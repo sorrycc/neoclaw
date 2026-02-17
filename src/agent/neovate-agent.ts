@@ -23,28 +23,31 @@ export class NeovateAgent implements Agent {
     this.memoryManager = new MemoryManager(config.agent.workspace);
   }
 
-  async processMessage(msg: InboundMessage): Promise<OutboundMessage | null> {
+  async *processMessage(msg: InboundMessage): AsyncGenerator<OutboundMessage> {
     const key = sessionKey(msg);
     const outChannel = (msg.metadata.originChannel as string) || msg.channel;
     const outChatId = (msg.metadata.originChatId as string) || msg.chatId;
-    const reply = (content: string): OutboundMessage => ({
-      channel: outChannel, chatId: outChatId, content, media: [], metadata: {},
+    const reply = (content: string, progress = false): OutboundMessage => ({
+      channel: outChannel, chatId: outChatId, content, media: [], metadata: { progress },
     });
 
     if (msg.content === "/new") {
       await this.resetSession(key);
-      return reply("Session cleared.");
+      yield reply("Session cleared.");
+      return;
     }
 
     if (msg.content === "/help") {
       const skills = this.getSkillNames();
       const skillLines = skills.map((s) => `/${s}`).join("\n");
       const base = "Commands:\n/new - Start a new session\n/help - Show this help\n/cron list - List scheduled jobs\n/cron add --every <seconds> <message>\n/cron add --at <ISO datetime> <message>\n/cron add --cron <expr> <message>\n/cron remove <id> - Remove a job";
-      return reply(skillLines ? `${base}\n\nSkills:\n${skillLines}` : base);
+      yield reply(skillLines ? `${base}\n\nSkills:\n${skillLines}` : base);
+      return;
     }
 
     if (msg.content.startsWith("/cron")) {
-      return reply(this.handleCronCommand(msg));
+      yield reply(this.handleCronCommand(msg));
+      return;
     }
 
     if (this.sessionManager.messageCount(key) > this.config.agent.memoryWindow) {
@@ -68,6 +71,7 @@ export class NeovateAgent implements Agent {
           {
             config() {
               return {
+                // quiet: true,
                 outputStyle: 'Minimal',
               };
             },
@@ -89,14 +93,25 @@ export class NeovateAgent implements Agent {
 
     let finalContent = "";
     for await (const m of sdkSession.receive()) {
-      if (m.type === "result") {
+      console.log(`[agent:receive] type=${m.type} role=${"role" in m ? m.role : "n/a"}`);
+      if (m.type === "message" && "role" in m && m.role === "assistant") {
+        const text = m.text || (typeof m.content === "string" ? m.content : "");
+        if (text) {
+          console.log(`[agent:yield] progress text=${JSON.stringify(text).slice(0, 80)}`);
+          yield reply(text, true);
+        }
+      } else if (m.type === "result") {
         finalContent = m.content;
+        console.log(`[agent:yield] result content=${JSON.stringify(finalContent).slice(0, 80)}`);
       }
     }
 
     this.sessionManager.append(key, "assistant", finalContent);
 
-    return reply(finalContent);
+    if (finalContent) {
+      console.log(`[agent:yield] final content=${JSON.stringify(finalContent).slice(0, 80)}`);
+      yield reply(finalContent);
+    }
   }
 
   private handleCronCommand(msg: InboundMessage): string {

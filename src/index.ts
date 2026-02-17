@@ -9,8 +9,9 @@ async function mainLoop(bus: MessageBus, agent: NeovateAgent): Promise<void> {
   while (true) {
     const msg = await bus.consumeInbound();
     try {
-      const response = await agent.processMessage(msg);
-      if (response) bus.publishOutbound(response);
+      for await (const response of agent.processMessage(msg)) {
+        bus.publishOutbound(response);
+      }
     } catch (err) {
       console.error("[main] error processing message:", err);
       bus.publishOutbound({
