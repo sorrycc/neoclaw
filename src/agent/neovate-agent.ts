@@ -42,7 +42,7 @@ export class NeovateAgent implements Agent {
 
     let sdkSession = this.sessions.get(key);
     if (!sdkSession) {
-      const systemContext = this.contextBuilder.getSystemContext();
+      const systemContext = this.contextBuilder.getSystemContext(msg.channel, msg.chatId);
       sdkSession = await createSession({
         model: this.config.agent.model,
         cwd: this.config.agent.workspace,
