@@ -7,6 +7,7 @@ import { CronService } from "./services/cron.js";
 import { HeartbeatService } from "./services/heartbeat.js";
 import { handleCronCommand } from "./commands/cron.js";
 import { handleStatusCommand } from "./commands/status.js";
+import { handleOnboardCommand } from "./commands/onboard.js";
 
 async function mainLoop(bus: MessageBus, agent: NeovateAgent): Promise<void> {
   while (true) {
@@ -38,6 +39,11 @@ async function main(): Promise<void> {
     const bus = new MessageBus();
     const cron = new CronService(config.agent.workspace, bus);
     console.log(handleStatusCommand(config, cron));
+    process.exit(0);
+  }
+
+  if (subcommand === "onboard") {
+    await handleOnboardCommand();
     process.exit(0);
   }
 

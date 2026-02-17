@@ -40,7 +40,7 @@ export interface Config {
 
 const DEFAULT_BASE = join(homedir(), ".neoclaw");
 
-const DEFAULT_CONFIG: Config = {
+export const DEFAULT_CONFIG: Config = {
   agent: {
     model: "anthropic/claude-sonnet-4-20250514",
     temperature: 0.7,
