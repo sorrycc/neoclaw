@@ -1,4 +1,6 @@
 import { Bot } from "grammy";
+import { join } from "path";
+import { readdirSync, existsSync, statSync } from "fs";
 import type { Channel } from "./channel.js";
 import type { MessageBus } from "../bus/message-bus.js";
 import type { TelegramConfig } from "../config/schema.js";
@@ -45,7 +47,7 @@ export class TelegramChannel implements Channel {
   private running = false;
   private typingIntervals = new Map<string, ReturnType<typeof setInterval>>();
 
-  constructor(private config: TelegramConfig, private bus: MessageBus) {
+  constructor(private config: TelegramConfig, private bus: MessageBus, private workspace: string) {
     this.bot = new Bot(config.token);
   }
 
@@ -70,6 +72,8 @@ export class TelegramChannel implements Channel {
       if (!this.isAllowed(senderId)) return;
       this.publishInbound(ctx.chat.id.toString(), senderId, "/help", []);
     });
+
+    this.registerSkillCommands();
 
     this.bot.on("message:text", (ctx) => {
       const senderId = `${ctx.from?.id}|${ctx.from?.username ?? ""}`;
@@ -117,6 +121,35 @@ export class TelegramChannel implements Channel {
       metadata: {},
     };
     this.bus.publishInbound(msg);
+  }
+
+  private getSkillNames(): string[] {
+    const skillsDir = join(this.workspace, "skills");
+    if (!existsSync(skillsDir)) return [];
+    return readdirSync(skillsDir).filter((entry) => {
+      const skillPath = join(skillsDir, entry);
+      return statSync(skillPath).isDirectory() && existsSync(join(skillPath, "SKILL.md"));
+    });
+  }
+
+  private registerSkillCommands(): void {
+    const skills = this.getSkillNames();
+    for (const name of skills) {
+      this.bot.command(name, (ctx) => {
+        const senderId = `${ctx.from?.id}|${ctx.from?.username ?? ""}`;
+        if (!this.isAllowed(senderId)) return;
+        const args = ctx.match ? ` ${ctx.match}` : "";
+        this.startTyping(ctx.chat.id.toString());
+        this.publishInbound(ctx.chat.id.toString(), senderId, `/${name}${args}`, []);
+      });
+    }
+    const commands = [
+      { command: "start", description: "Start the bot" },
+      { command: "new", description: "Start a new conversation" },
+      { command: "help", description: "Show available commands" },
+      ...skills.map((s) => ({ command: s, description: s })),
+    ];
+    this.bot.api.setMyCommands(commands).catch(() => {});
   }
 
   private startTyping(chatId: string): void {

@@ -1,3 +1,5 @@
+import { join } from "path";
+import { readdirSync, existsSync, statSync } from "fs";
 import { createSession, type SDKSession } from "@neovate/code";
 import type { Agent } from "./agent.js";
 import type { InboundMessage, OutboundMessage } from "../bus/types.js";
@@ -35,9 +37,10 @@ export class NeovateAgent implements Agent {
     }
 
     if (msg.content === "/help") {
-      return reply(
-        "Commands:\n/new - Start a new session\n/help - Show this help\n/cron list - List scheduled jobs\n/cron add --every <seconds> <message>\n/cron add --at <ISO datetime> <message>\n/cron add --cron <expr> <message>\n/cron remove <id> - Remove a job"
-      );
+      const skills = this.getSkillNames();
+      const skillLines = skills.map((s) => `/${s}`).join("\n");
+      const base = "Commands:\n/new - Start a new session\n/help - Show this help\n/cron list - List scheduled jobs\n/cron add --every <seconds> <message>\n/cron add --at <ISO datetime> <message>\n/cron add --cron <expr> <message>\n/cron remove <id> - Remove a job";
+      return reply(skillLines ? `${base}\n\nSkills:\n${skillLines}` : base);
     }
 
     if (msg.content.startsWith("/cron")) {
@@ -150,6 +153,15 @@ export class NeovateAgent implements Agent {
     }
 
     return "Unknown cron action. Use: list, add, remove";
+  }
+
+  private getSkillNames(): string[] {
+    const skillsDir = join(this.config.agent.workspace, "skills");
+    if (!existsSync(skillsDir)) return [];
+    return readdirSync(skillsDir).filter((entry) => {
+      const skillPath = join(skillsDir, entry);
+      return statSync(skillPath).isDirectory() && existsSync(join(skillPath, "SKILL.md"));
+    });
   }
 
   private async resetSession(key: string): Promise<void> {

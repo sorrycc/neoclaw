@@ -13,7 +13,7 @@ export class ChannelManager {
       this.channels.set("cli", new CLIChannel(bus));
     }
     if (config.channels.telegram.enabled) {
-      this.channels.set("telegram", new TelegramChannel(config.channels.telegram, bus));
+      this.channels.set("telegram", new TelegramChannel(config.channels.telegram, bus, config.agent.workspace));
     }
   }
 
