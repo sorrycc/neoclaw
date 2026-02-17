@@ -6,6 +6,7 @@ import { NeovateAgent } from "./agent/neovate-agent.js";
 import { CronService } from "./services/cron.js";
 import { HeartbeatService } from "./services/heartbeat.js";
 import { handleCronCommand } from "./commands/cron.js";
+import { handleStatusCommand } from "./commands/status.js";
 
 async function mainLoop(bus: MessageBus, agent: NeovateAgent): Promise<void> {
   while (true) {
@@ -30,6 +31,15 @@ async function mainLoop(bus: MessageBus, agent: NeovateAgent): Promise<void> {
 async function main(): Promise<void> {
   const argv = yargsParser(process.argv.slice(2));
   const subcommand = argv._[0] as string | undefined;
+
+  if (subcommand === "status") {
+    const config = loadConfig();
+    ensureWorkspaceDirs(config.agent.workspace);
+    const bus = new MessageBus();
+    const cron = new CronService(config.agent.workspace, bus);
+    console.log(handleStatusCommand(config, cron));
+    process.exit(0);
+  }
 
   if (subcommand === "cron") {
     const config = loadConfig();
