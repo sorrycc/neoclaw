@@ -9,11 +9,13 @@
   },
   "dependencies": {
     "@neovate/code": "^0.28.2",
+    "cron-parser": "^4.9.0",
     "grammy": "^1.31.0",
-    "cron-parser": "^4.9.0"
+    "yargs-parser": "^22.0.0"
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "@types/yargs-parser": "^21.0.3",
     "typescript": "^5.7.0"
   }
 }

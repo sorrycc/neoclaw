@@ -40,13 +40,8 @@ export class NeovateAgent implements Agent {
     if (msg.content === "/help") {
       const skills = this.getSkillNames();
       const skillLines = skills.map((s) => `/${s}`).join("\n");
-      const base = "Commands:\n/new - Start a new session\n/help - Show this help\n/cron list - List scheduled jobs\n/cron add --every <seconds> <message>\n/cron add --at <ISO datetime> <message>\n/cron add --cron <expr> <message>\n/cron remove <id> - Remove a job";
+      const base = "Commands:\n/new - Start a new session\n/help - Show this help";
       yield reply(skillLines ? `${base}\n\nSkills:\n${skillLines}` : base);
-      return;
-    }
-
-    if (msg.content.startsWith("/cron")) {
-      yield reply(this.handleCronCommand(msg));
       return;
     }
 
@@ -112,62 +107,6 @@ export class NeovateAgent implements Agent {
       console.log(`[agent:yield] final content=${JSON.stringify(finalContent).slice(0, 80)}`);
       yield reply(finalContent);
     }
-  }
-
-  private handleCronCommand(msg: InboundMessage): string {
-    const parts = msg.content.trim().split(/\s+/);
-    const action = parts[1];
-
-    if (!action || action === "list") {
-      const jobs = this.cronService.listJobs();
-      if (!jobs.length) return "No scheduled jobs.";
-      return jobs.map((j) => `[${j.id}] ${j.type}(${j.schedule}) — ${j.payload.message}`).join("\n");
-    }
-
-    if (action === "remove") {
-      const id = parts[2];
-      if (!id) return "Usage: /cron remove <id>";
-      return this.cronService.removeJob(id) ? `Removed job ${id}` : `Job ${id} not found`;
-    }
-
-    if (action === "add") {
-      const flag = parts[2];
-      if (flag === "--every") {
-        const seconds = parseInt(parts[3], 10);
-        if (isNaN(seconds) || seconds <= 0) return "Usage: /cron add --every <seconds> <message>";
-        const message = parts.slice(4).join(" ");
-        if (!message) return "Usage: /cron add --every <seconds> <message>";
-        const job = this.cronService.addJob({ type: "every", schedule: seconds * 1000, message, channel: msg.channel, chatId: msg.chatId });
-        return `Created job '${job.payload.message}' (id: ${job.id})`;
-      }
-      if (flag === "--at") {
-        const at = parts[3];
-        if (!at) return "Usage: /cron add --at <ISO datetime> <message>";
-        const message = parts.slice(4).join(" ");
-        if (!message) return "Usage: /cron add --at <ISO datetime> <message>";
-        const job = this.cronService.addJob({ type: "at", schedule: at, message, channel: msg.channel, chatId: msg.chatId });
-        return `Created job '${job.payload.message}' (id: ${job.id})`;
-      }
-      if (flag === "--cron") {
-        const exprParts: string[] = [];
-        let i = 3;
-        for (; i < parts.length; i++) {
-          if (/^\d/.test(parts[i]) || parts[i] === "*") {
-            exprParts.push(parts[i]);
-          } else {
-            break;
-          }
-        }
-        const expr = exprParts.join(" ");
-        const message = parts.slice(i).join(" ");
-        if (!expr || !message) return "Usage: /cron add --cron <expr> <message>";
-        const job = this.cronService.addJob({ type: "cron", schedule: expr, message, channel: msg.channel, chatId: msg.chatId });
-        return `Created job '${job.payload.message}' (id: ${job.id})`;
-      }
-      return "Usage: /cron add --every|--at|--cron <value> <message>";
-    }
-
-    return "Unknown cron action. Use: list, add, remove";
   }
 
   private getSkillNames(): string[] {
