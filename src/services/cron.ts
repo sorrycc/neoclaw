@@ -1,9 +1,11 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
+import { randomUUID } from "crypto";
+import { parseExpression } from "cron-parser";
 import type { MessageBus } from "../bus/message-bus.js";
 import type { InboundMessage } from "../bus/types.js";
 
-interface CronJob {
+export interface CronJob {
   id: string;
   type: "at" | "every" | "cron";
   schedule: string | number;
@@ -62,6 +64,22 @@ export class CronService {
         }
       };
       this.timers.set(job.id, setTimeout(fire, job.schedule as number));
+    } else if (job.type === "cron") {
+      const scheduleNext = () => {
+        try {
+          const interval = parseExpression(job.schedule as string);
+          const next = interval.next().getTime();
+          const delay = next - Date.now();
+          if (delay <= 0) return;
+          this.timers.set(job.id, setTimeout(() => {
+            this.fireJob(job);
+            if (this.running) scheduleNext();
+          }, delay));
+        } catch {
+          // invalid cron expression, skip
+        }
+      };
+      scheduleNext();
     }
   }
 
@@ -78,5 +96,35 @@ export class CronService {
     this.bus.publishInbound(msg);
     job.lastRun = new Date().toISOString();
     this.saveJobs();
+  }
+
+  addJob(opts: { type: CronJob["type"]; schedule: string | number; message: string; channel: string; chatId: string }): CronJob {
+    const job: CronJob = {
+      id: randomUUID().slice(0, 8),
+      type: opts.type,
+      schedule: opts.schedule,
+      payload: { message: opts.message, channel: opts.channel, chatId: opts.chatId },
+    };
+    this.jobs.push(job);
+    this.saveJobs();
+    if (this.running) this.armJob(job);
+    return job;
+  }
+
+  removeJob(jobId: string): boolean {
+    const idx = this.jobs.findIndex((j) => j.id === jobId);
+    if (idx === -1) return false;
+    const timer = this.timers.get(jobId);
+    if (timer) {
+      clearTimeout(timer);
+      this.timers.delete(jobId);
+    }
+    this.jobs.splice(idx, 1);
+    this.saveJobs();
+    return true;
+  }
+
+  listJobs(): CronJob[] {
+    return [...this.jobs];
   }
 }

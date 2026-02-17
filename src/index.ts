@@ -33,9 +33,9 @@ async function main(): Promise<void> {
   console.log(`[neoclaw] workspace: ${config.agent.workspace}`);
 
   const bus = new MessageBus();
-  const agent = new NeovateAgent(config);
-  const channelManager = new ChannelManager(config, bus);
   const cron = new CronService(config.agent.workspace, bus);
+  const agent = new NeovateAgent(config, cron);
+  const channelManager = new ChannelManager(config, bus);
   const heartbeat = new HeartbeatService(config.agent.workspace, bus);
 
   process.on("SIGINT", async () => {
