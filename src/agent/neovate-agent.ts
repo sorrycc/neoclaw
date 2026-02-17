@@ -42,11 +42,24 @@ export class NeovateAgent implements Agent {
 
     let sdkSession = this.sessions.get(key);
     if (!sdkSession) {
+      const systemContext = this.contextBuilder.getSystemContext();
       sdkSession = await createSession({
         model: this.config.agent.model,
         cwd: this.config.agent.workspace,
         skills: this.contextBuilder.getSkillPaths(),
         providers: this.config.providers,
+        plugins: [
+          {
+            config() {
+              return {
+                outputStyle: 'Minimal',
+              };
+            },
+            systemPrompt(original) {
+              return `${original}\n\n${systemContext}`;
+            },
+          }
+        ],
       });
       this.sessions.set(key, sdkSession);
     }
