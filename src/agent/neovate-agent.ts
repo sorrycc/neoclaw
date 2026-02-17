@@ -18,9 +18,9 @@ export class NeovateAgent implements Agent {
   private memoryManager: MemoryManager;
 
   constructor(private config: Config, private cronService: CronService) {
-    this.contextBuilder = new ContextBuilder(config.agent.workspace);
-    this.sessionManager = new SessionManager(config.agent.workspace);
     this.memoryManager = new MemoryManager(config.agent.workspace);
+    this.contextBuilder = new ContextBuilder(config.agent.workspace, this.memoryManager);
+    this.sessionManager = new SessionManager(config.agent.workspace);
   }
 
   async *processMessage(msg: InboundMessage): AsyncGenerator<OutboundMessage> {
