@@ -7,6 +7,7 @@ export class MemoryManager {
 
   constructor(workspace: string) {
     this.memoryDir = join(workspace, "memory");
+    console.log("[MemoryManager] constructor: memoryDir =", this.memoryDir);
     mkdirSync(this.memoryDir, { recursive: true });
   }
 
@@ -19,15 +20,18 @@ export class MemoryManager {
   }
 
   readMemory(): string {
+    console.log("[MemoryManager] readMemory");
     if (!existsSync(this.memoryPath)) return "";
     return readFileSync(this.memoryPath, "utf-8").trim();
   }
 
   writeMemory(content: string): void {
+    console.log("[MemoryManager] writeMemory");
     writeFileSync(this.memoryPath, content, "utf-8");
   }
 
   appendHistory(entry: string): void {
+    console.log("[MemoryManager] appendHistory");
     const line = `\n## ${new Date().toISOString()}\n${entry}\n`;
     appendFileSync(this.historyPath, line, "utf-8");
   }
@@ -36,6 +40,7 @@ export class MemoryManager {
     messages: Array<{ role: string; content: string }>,
     model: string
   ): Promise<void> {
+    console.log("[MemoryManager] consolidate: messages =", messages.length);
     const currentMemory = this.readMemory();
     const conversationText = messages
       .map((m) => `[${m.role}]: ${m.content}`)
