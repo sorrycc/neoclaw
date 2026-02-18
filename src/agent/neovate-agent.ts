@@ -10,9 +10,11 @@ import { MemoryManager } from "../memory/memory.js";
 import type { Config } from "../config/schema.js";
 import type { CronService } from "../services/cron.js";
 import { createCronTool } from "./tools/cron.js";
+import { createSendFileTool } from "./tools/send-file.js";
 
 export class NeovateAgent implements Agent {
   private sessions = new Map<string, SDKSession>();
+  private pendingMediaMap = new Map<string, string[]>();
   private contextBuilder: ContextBuilder;
   private sessionManager: SessionManager;
   private memoryManager: MemoryManager;
@@ -53,10 +55,16 @@ export class NeovateAgent implements Agent {
       await this.resetSession(key);
     }
 
+    if (!this.pendingMediaMap.has(key)) {
+      this.pendingMediaMap.set(key, []);
+    }
+    const pendingMedia = this.pendingMediaMap.get(key)!;
+
     let sdkSession = this.sessions.get(key);
     if (!sdkSession) {
       const systemContext = this.contextBuilder.getSystemContext(msg.channel, msg.chatId);
       const cronTool = createCronTool({ cronService: this.cronService, channel: msg.channel, chatId: msg.chatId });
+      const sendFileTool = createSendFileTool({ pendingMedia, workspace: this.config.agent.workspace });
       sdkSession = await createSession({
         model: this.config.agent.model,
         cwd: this.config.agent.workspace,
@@ -77,7 +85,7 @@ export class NeovateAgent implements Agent {
               return `${original}\n\n${systemContext}`;
             },
             tool() {
-              return [cronTool];
+              return [cronTool, sendFileTool];
             },
           }
         ],
@@ -132,9 +140,14 @@ export class NeovateAgent implements Agent {
 
     this.sessionManager.append(key, "assistant", finalContent);
 
-    if (finalContent) {
-      console.log(`[agent:yield] final content=${JSON.stringify(finalContent).slice(0, 80)}`);
-      yield reply(finalContent);
+    const media = pendingMedia.splice(0);
+
+    if (finalContent || media.length > 0) {
+      console.log(`[agent:yield] final content=${JSON.stringify(finalContent).slice(0, 80)} media=${media.length}`);
+      yield {
+        channel: outChannel, chatId: outChatId, content: finalContent,
+        media, metadata: { progress: false },
+      };
     }
   }
 
@@ -153,6 +166,7 @@ export class NeovateAgent implements Agent {
       existing.close();
       this.sessions.delete(key);
     }
+    this.pendingMediaMap.delete(key);
     this.sessionManager.clear(key);
   }
 }

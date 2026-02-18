@@ -1,4 +1,5 @@
-import { Bot } from "grammy";
+import { Bot, InputFile } from "grammy";
+import type { InputMediaPhoto } from "grammy/types";
 import { join } from "path";
 import { readdirSync, existsSync, statSync } from "fs";
 import type { Channel } from "./channel.js";
@@ -39,6 +40,16 @@ function mdToTelegramHtml(md: string): string {
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+const CAPTION_LIMIT = 1024;
+
+function isUrl(s: string): boolean {
+  return s.startsWith("http://") || s.startsWith("https://");
+}
+
+function toMediaSource(s: string): string | InputFile {
+  return isUrl(s) ? s : new InputFile(s);
 }
 
 export class TelegramChannel implements Channel {
@@ -104,19 +115,66 @@ export class TelegramChannel implements Channel {
   async send(msg: OutboundMessage): Promise<void> {
     const chatId = msg.chatId;
     const numericChatId = Number(chatId);
-    const html = mdToTelegramHtml(msg.content);
 
     if (!msg.metadata.progress) {
       this.stopTyping(chatId);
     }
 
-    if (this.lastSentContent.get(chatId) === msg.content) return;
-    this.lastSentContent.set(chatId, msg.content);
+    const dedup = msg.content + msg.media.join(",");
+    if (this.lastSentContent.get(chatId) === dedup) return;
+    this.lastSentContent.set(chatId, dedup);
 
+    if (msg.media.length > 0) {
+      await this.sendWithMedia(numericChatId, msg);
+    } else {
+      await this.sendText(numericChatId, msg.content);
+    }
+  }
+
+  private async sendText(chatId: number, content: string): Promise<void> {
+    const html = mdToTelegramHtml(content);
     try {
-      await this.bot.api.sendMessage(numericChatId, html, { parse_mode: "HTML" });
+      await this.bot.api.sendMessage(chatId, html, { parse_mode: "HTML" });
     } catch {
-      await this.bot.api.sendMessage(numericChatId, msg.content);
+      await this.bot.api.sendMessage(chatId, content);
+    }
+  }
+
+  private async sendWithMedia(chatId: number, msg: OutboundMessage): Promise<void> {
+    const html = msg.content ? mdToTelegramHtml(msg.content) : "";
+    const captionFits = html.length <= CAPTION_LIMIT;
+
+    if (msg.media.length === 1) {
+      const source = toMediaSource(msg.media[0]);
+      try {
+        await this.bot.api.sendPhoto(chatId, source, {
+          ...(captionFits && html ? { caption: html, parse_mode: "HTML" } : {}),
+        });
+      } catch {
+        await this.bot.api.sendPhoto(chatId, source, {
+          ...(captionFits && msg.content ? { caption: msg.content } : {}),
+        });
+      }
+    } else {
+      const group: InputMediaPhoto[] = msg.media.map((m, i) => ({
+        type: "photo" as const,
+        media: isUrl(m) ? m : new InputFile(m),
+        ...(i === 0 && captionFits && html ? { caption: html, parse_mode: "HTML" as const } : {}),
+      }));
+      try {
+        await this.bot.api.sendMediaGroup(chatId, group);
+      } catch {
+        const fallback: InputMediaPhoto[] = msg.media.map((m, i) => ({
+          type: "photo" as const,
+          media: isUrl(m) ? m : new InputFile(m),
+          ...(i === 0 && captionFits && msg.content ? { caption: msg.content } : {}),
+        }));
+        await this.bot.api.sendMediaGroup(chatId, fallback);
+      }
+    }
+
+    if (!captionFits && msg.content) {
+      await this.sendText(chatId, msg.content);
     }
   }
 
