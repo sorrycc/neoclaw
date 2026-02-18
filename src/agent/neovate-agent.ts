@@ -91,16 +91,42 @@ export class NeovateAgent implements Agent {
 
     let finalContent = "";
     for await (const m of sdkSession.receive()) {
-      console.log(`[agent:receive] type=${m.type} role=${"role" in m ? m.role : "n/a"}`);
-      if (m.type === "message" && "role" in m && m.role === "assistant") {
-        const text = m.text || (typeof m.content === "string" ? m.content : "");
-        if (text) {
-          console.log(`[agent:yield] progress text=${JSON.stringify(text).slice(0, 80)}`);
-          yield reply(text, true);
+      if (m.type === "system") {
+        console.log(`[agent:init] session=${m.sessionId} model=${m.model} tools=${m.tools.join(",")}`);
+
+      } else if (m.type === "message" && "role" in m && m.role === "assistant") {
+        if (Array.isArray(m.content)) {
+          for (const part of m.content) {
+            if (part.type === "text" && part.text) {
+              yield reply(part.text, true);
+            } else if (part.type === "reasoning" && part.text) {
+              console.log(`[agent:thinking] ${part.text.slice(0, 120)}`);
+              yield reply(part.text, true);
+            } else if (part.type === "tool_use") {
+              console.log(`[agent:tool_use] ${part.displayName || part.name} id=${part.id} input=${JSON.stringify(part.input).slice(0, 100)}`);
+            }
+          }
+        } else {
+          const text = m.text || (typeof m.content === "string" ? m.content : "");
+          if (text) yield reply(text, true);
         }
+
+      } else if (m.type === "message" && "role" in m && (m.role === "tool" || m.role === "user")) {
+        const parts = Array.isArray(m.content) ? m.content : [];
+        for (const part of parts) {
+          if ("name" in part) {
+            const status = (part as any).result?.isError ? "error" : "ok";
+            console.log(`[agent:tool_result] ${(part as any).name} status=${status}`);
+          }
+        }
+
       } else if (m.type === "result") {
         finalContent = m.content;
-        console.log(`[agent:yield] result content=${JSON.stringify(finalContent).slice(0, 80)}`);
+        const status = m.isError ? "error" : "success";
+        console.log(`[agent:result] ${status} content=${JSON.stringify(finalContent).slice(0, 80)}`);
+        if (m.usage) {
+          console.log(`[agent:usage] in=${m.usage.input_tokens} out=${m.usage.output_tokens}`);
+        }
       }
     }
 
