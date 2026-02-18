@@ -66,8 +66,11 @@ export class NeovateAgent implements Agent {
           {
             config() {
               return {
-                // quiet: true,
                 outputStyle: 'Minimal',
+                tools: {
+                  ExitPlanMode: false,
+                  AskUserQuestion: false,
+                },
               };
             },
             systemPrompt(original) {
