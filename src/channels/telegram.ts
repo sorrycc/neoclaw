@@ -46,7 +46,7 @@ export class TelegramChannel implements Channel {
   private bot: Bot;
   private running = false;
   private typingIntervals = new Map<string, ReturnType<typeof setInterval>>();
-  private progressMessages = new Map<string, number>();
+  private lastSentContent = new Map<string, string>();
 
   constructor(private config: TelegramConfig, private bus: MessageBus, private workspace: string) {
     this.bot = new Bot(config.token);
@@ -102,80 +102,25 @@ export class TelegramChannel implements Channel {
   }
 
   async send(msg: OutboundMessage): Promise<void> {
-    const isProgress = !!msg.metadata.progress;
     const chatId = msg.chatId;
     const numericChatId = Number(chatId);
     const html = mdToTelegramHtml(msg.content);
 
-    console.log(`[tg:send] chatId=${chatId} isProgress=${isProgress} content=${JSON.stringify(msg.content).slice(0, 80)} progressMap=${JSON.stringify([...this.progressMessages.entries()])}`);
-
-    if (isProgress) {
-      const existingMsgId = this.progressMessages.get(chatId);
-      console.log(`[tg:send:progress] existingMsgId=${existingMsgId}`);
-      if (existingMsgId) {
-        try {
-          await this.bot.api.editMessageText(numericChatId, existingMsgId, html, { parse_mode: "HTML" });
-          console.log(`[tg:send:progress] edited ${existingMsgId}`);
-          return;
-        } catch {
-          try {
-            await this.bot.api.editMessageText(numericChatId, existingMsgId, msg.content);
-            console.log(`[tg:send:progress] edited ${existingMsgId} (plain)`);
-            return;
-          } catch {}
-        }
-      }
-      try {
-        const sent = await this.bot.api.sendMessage(numericChatId, html, { parse_mode: "HTML" });
-        this.progressMessages.set(chatId, sent.message_id);
-        console.log(`[tg:send:progress] sent new msg ${sent.message_id}`);
-      } catch {
-        const sent = await this.bot.api.sendMessage(numericChatId, msg.content);
-        this.progressMessages.set(chatId, sent.message_id);
-        console.log(`[tg:send:progress] sent new msg ${sent.message_id} (plain)`);
-      }
-      return;
+    if (!msg.metadata.progress) {
+      this.stopTyping(chatId);
     }
 
-    this.stopTyping(chatId);
-    const prevMsgId = this.progressMessages.get(chatId);
-    this.progressMessages.delete(chatId);
-    console.log(`[tg:send:final] prevMsgId=${prevMsgId}`);
-    if (prevMsgId) {
-      try {
-        await this.bot.api.editMessageText(numericChatId, prevMsgId, html, { parse_mode: "HTML" });
-        console.log(`[tg:send:final] edited ${prevMsgId}`);
-        return;
-      } catch (err: any) {
-        if (err?.error_code === 400 && err?.description?.includes("message is not modified")) {
-          console.log(`[tg:send:final] already up-to-date ${prevMsgId}`);
-          return;
-        }
-        console.log(`[tg:send:final] edit failed:`, err);
-        try {
-          await this.bot.api.editMessageText(numericChatId, prevMsgId, msg.content);
-          console.log(`[tg:send:final] edited ${prevMsgId} (plain)`);
-          return;
-        } catch (err2: any) {
-          if (err2?.error_code === 400 && err2?.description?.includes("message is not modified")) {
-            console.log(`[tg:send:final] already up-to-date ${prevMsgId} (plain)`);
-            return;
-          }
-          console.log(`[tg:send:final] edit plain failed:`, err2);
-        }
-      }
-    }
+    if (this.lastSentContent.get(chatId) === msg.content) return;
+    this.lastSentContent.set(chatId, msg.content);
+
     try {
       await this.bot.api.sendMessage(numericChatId, html, { parse_mode: "HTML" });
-      console.log(`[tg:send:final] sent new msg (fallback)`);
     } catch {
       await this.bot.api.sendMessage(numericChatId, msg.content);
-      console.log(`[tg:send:final] sent new msg (plain fallback)`);
     }
   }
 
   private publishInbound(chatId: string, senderId: string, content: string, media: string[]): void {
-    this.progressMessages.delete(chatId);
     const msg: InboundMessage = {
       channel: "telegram",
       senderId,
