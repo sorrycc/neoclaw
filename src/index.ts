@@ -1,6 +1,7 @@
 import yargsParser from "yargs-parser";
 import { join } from "path";
 import { homedir } from "os";
+import pkg from "../package.json";
 import { loadConfig, ensureWorkspaceDirs } from "./config/schema.js";
 import { MessageBus } from "./bus/message-bus.js";
 import { ChannelManager } from "./channels/manager.js";
@@ -12,7 +13,7 @@ import { handleStatusCommand } from "./commands/status.js";
 import { handleOnboardCommand } from "./commands/onboard.js";
 
 function showHelp(): void {
-  console.log(`neoclaw v0.1.0 - A multi-channel AI agent
+  console.log(`neoclaw v${pkg.version} - A multi-channel AI agent
 
 Usage: neoclaw [command] [options]
 
@@ -26,7 +27,8 @@ Commands:
 Options:
   --profile <name>  Use a named profile (~/.neoclaw-<name>)
   --dev             Use dev profile (~/.neoclaw-dev)
-  -h, --help        Show this help message`);
+  -h, --help        Show this help message
+  -v, --version     Print version and exit`);
 }
 
 function resolveBaseDir(argv: yargsParser.Arguments): string {
@@ -72,6 +74,11 @@ async function main(): Promise<void> {
   const argv = yargsParser(process.argv.slice(2));
   const baseDir = resolveBaseDir(argv);
   const subcommand = argv._[0] as string | undefined;
+
+  if (argv.v || argv.version) {
+    console.log(pkg.version);
+    process.exit(0);
+  }
 
   if (argv.h || argv.help || subcommand === "help") {
     showHelp();
