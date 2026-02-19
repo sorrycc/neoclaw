@@ -38,21 +38,21 @@ export interface Config {
   providers?: Record<string, ProviderConfig>;
 }
 
-const DEFAULT_BASE = join(homedir(), ".neoclaw");
-
-export const DEFAULT_CONFIG: Config = {
-  agent: {
-    model: "anthropic/claude-sonnet-4-20250514",
-    temperature: 0.7,
-    maxTokens: 4096,
-    memoryWindow: 50,
-    workspace: join(DEFAULT_BASE, "workspace"),
-  },
-  channels: {
-    telegram: { enabled: false, token: "", allowFrom: [] },
-    cli: { enabled: true },
-  },
-};
+export function defaultConfig(baseDir: string): Config {
+  return {
+    agent: {
+      model: "anthropic/claude-sonnet-4-20250514",
+      temperature: 0.7,
+      maxTokens: 4096,
+      memoryWindow: 50,
+      workspace: join(baseDir, "workspace"),
+    },
+    channels: {
+      telegram: { enabled: false, token: "", allowFrom: [] },
+      cli: { enabled: true },
+    },
+  };
+}
 
 function envOverride(config: Config): Config {
   const t = process.env.NEOCLAW_TELEGRAM_TOKEN;
@@ -71,26 +71,27 @@ function envOverride(config: Config): Config {
   return config;
 }
 
-export function configPath(): string {
-  return join(DEFAULT_BASE, "config.json");
+export function configPath(baseDir: string): string {
+  return join(baseDir, "config.json");
 }
 
-export function loadConfig(): Config {
-  const path = configPath();
+export function loadConfig(baseDir: string): Config {
+  const defaults = defaultConfig(baseDir);
+  const path = configPath(baseDir);
   let config: Config;
 
   if (existsSync(path)) {
     const raw = JSON.parse(readFileSync(path, "utf-8"));
-    config = { ...DEFAULT_CONFIG, ...raw };
-    config.agent = { ...DEFAULT_CONFIG.agent, ...raw.agent };
+    config = { ...defaults, ...raw };
+    config.agent = { ...defaults.agent, ...raw.agent };
     config.channels = {
-      telegram: { ...DEFAULT_CONFIG.channels.telegram, ...raw.channels?.telegram },
-      cli: { ...DEFAULT_CONFIG.channels.cli, ...raw.channels?.cli },
+      telegram: { ...defaults.channels.telegram, ...raw.channels?.telegram },
+      cli: { ...defaults.channels.cli, ...raw.channels?.cli },
     };
   } else {
-    config = structuredClone(DEFAULT_CONFIG);
-    mkdirSync(DEFAULT_BASE, { recursive: true });
-    writeFileSync(path, JSON.stringify(DEFAULT_CONFIG, null, 2), "utf-8");
+    config = structuredClone(defaults);
+    mkdirSync(baseDir, { recursive: true });
+    writeFileSync(path, JSON.stringify(defaults, null, 2), "utf-8");
   }
 
   return envOverride(config);

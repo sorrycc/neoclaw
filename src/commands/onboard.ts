@@ -4,8 +4,8 @@ import { createInterface } from "readline";
 import {
   configPath,
   loadConfig,
+  defaultConfig,
   ensureWorkspaceDirs,
-  DEFAULT_CONFIG,
 } from "../config/schema.js";
 
 const TEMPLATES: Record<string, string> = {
@@ -31,8 +31,9 @@ function askYesNo(question: string): Promise<boolean> {
   });
 }
 
-export async function handleOnboardCommand(): Promise<void> {
-  const cfgPath = configPath();
+export async function handleOnboardCommand(baseDir: string): Promise<void> {
+  const cfgPath = configPath(baseDir);
+  const defaults = defaultConfig(baseDir);
 
   if (existsSync(cfgPath)) {
     console.log(`Config already exists at ${cfgPath}`);
@@ -43,20 +44,20 @@ export async function handleOnboardCommand(): Promise<void> {
     const overwrite = await askYesNo("Overwrite? [y/N] ");
     if (overwrite) {
       mkdirSync(dirname(cfgPath), { recursive: true });
-      writeFileSync(cfgPath, JSON.stringify(DEFAULT_CONFIG, null, 2), "utf-8");
+      writeFileSync(cfgPath, JSON.stringify(defaults, null, 2), "utf-8");
       console.log(`✓ Config reset to defaults at ${cfgPath}`);
     } else {
-      const config = loadConfig();
+      const config = loadConfig(baseDir);
       writeFileSync(cfgPath, JSON.stringify(config, null, 2), "utf-8");
       console.log(`✓ Config refreshed at ${cfgPath} (existing values preserved)`);
     }
   } else {
     mkdirSync(dirname(cfgPath), { recursive: true });
-    writeFileSync(cfgPath, JSON.stringify(DEFAULT_CONFIG, null, 2), "utf-8");
+    writeFileSync(cfgPath, JSON.stringify(defaults, null, 2), "utf-8");
     console.log(`✓ Created config at ${cfgPath}`);
   }
 
-  const config = loadConfig();
+  const config = loadConfig(baseDir);
   const workspace = config.agent.workspace;
   ensureWorkspaceDirs(workspace);
   console.log(`✓ Workspace at ${workspace}`);

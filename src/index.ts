@@ -1,4 +1,6 @@
 import yargsParser from "yargs-parser";
+import { join } from "path";
+import { homedir } from "os";
 import { loadConfig, ensureWorkspaceDirs } from "./config/schema.js";
 import { MessageBus } from "./bus/message-bus.js";
 import { ChannelManager } from "./channels/manager.js";
@@ -8,6 +10,25 @@ import { HeartbeatService } from "./services/heartbeat.js";
 import { handleCronCommand } from "./commands/cron.js";
 import { handleStatusCommand } from "./commands/status.js";
 import { handleOnboardCommand } from "./commands/onboard.js";
+
+function resolveBaseDir(argv: yargsParser.Arguments): string {
+  const { profile, dev } = argv;
+
+  if (dev && profile) {
+    console.error("Error: Cannot use --dev and --profile together");
+    process.exit(1);
+  }
+
+  if (profile === true) {
+    console.error("Error: --profile requires a name");
+    process.exit(1);
+  }
+
+  const resolved = dev ? "dev" : (profile as string | undefined);
+  return resolved
+    ? join(homedir(), `.neoclaw-${resolved}`)
+    : join(homedir(), ".neoclaw");
+}
 
 async function mainLoop(bus: MessageBus, agent: NeovateAgent): Promise<void> {
   while (true) {
@@ -31,24 +52,25 @@ async function mainLoop(bus: MessageBus, agent: NeovateAgent): Promise<void> {
 
 async function main(): Promise<void> {
   const argv = yargsParser(process.argv.slice(2));
+  const baseDir = resolveBaseDir(argv);
   const subcommand = argv._[0] as string | undefined;
 
   if (subcommand === "status") {
-    const config = loadConfig();
+    const config = loadConfig(baseDir);
     ensureWorkspaceDirs(config.agent.workspace);
     const bus = new MessageBus();
     const cron = new CronService(config.agent.workspace, bus);
-    console.log(handleStatusCommand(config, cron));
+    console.log(handleStatusCommand(config, cron, baseDir));
     process.exit(0);
   }
 
   if (subcommand === "onboard") {
-    await handleOnboardCommand();
+    await handleOnboardCommand(baseDir);
     process.exit(0);
   }
 
   if (subcommand === "cron") {
-    const config = loadConfig();
+    const config = loadConfig(baseDir);
     ensureWorkspaceDirs(config.agent.workspace);
     const bus = new MessageBus();
     const cron = new CronService(config.agent.workspace, bus);
@@ -57,7 +79,7 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  const config = loadConfig();
+  const config = loadConfig(baseDir);
   ensureWorkspaceDirs(config.agent.workspace);
 
   console.log("[neoclaw] starting...");

@@ -3,10 +3,10 @@ import type { Config } from "../config/schema.js";
 import { configPath } from "../config/schema.js";
 import type { CronService } from "../services/cron.js";
 
-export function handleStatusCommand(config: Config, cron: CronService): string {
+export function handleStatusCommand(config: Config, cron: CronService, baseDir: string): string {
   const lines: string[] = ["[neoclaw] Status", ""];
 
-  const cfgPath = configPath();
+  const cfgPath = configPath(baseDir);
   lines.push(`Config:    ${cfgPath} ${existsSync(cfgPath) ? "✓" : "✗"}`);
   lines.push(`Workspace: ${config.agent.workspace} ${existsSync(config.agent.workspace) ? "✓" : "✗"}`);
   lines.push(`Model:     ${config.agent.model}`);
