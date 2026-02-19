@@ -86,6 +86,29 @@ export class SessionManager {
     console.log("[SessionManager] updateConsolidated:", key, index);
     const session = this.get(key);
     session.lastConsolidated = index;
+    this.flush(key);
+  }
+
+  trimBefore(key: string, keepFrom: number): void {
+    console.log("[SessionManager] trimBefore:", key, keepFrom);
+    const session = this.get(key);
+    session.messages = session.messages.slice(keepFrom);
+    session.lastConsolidated = 0;
+    this.flush(key);
+  }
+
+  private flush(key: string): void {
+    const session = this.get(key);
+    const path = this.filePath(key);
+    const meta: SessionMeta = {
+      _type: "metadata", key, createdAt: new Date().toISOString(),
+      lastConsolidated: session.lastConsolidated,
+    };
+    const lines = [JSON.stringify(meta)];
+    for (const msg of session.messages) {
+      lines.push(JSON.stringify(msg));
+    }
+    writeFileSync(path, lines.join("\n") + "\n", "utf-8");
   }
 
   messageCount(key: string): number {

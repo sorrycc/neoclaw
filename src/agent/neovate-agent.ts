@@ -34,6 +34,10 @@ export class NeovateAgent implements Agent {
     });
 
     if (msg.content === "/new") {
+      const session = this.sessionManager.get(key);
+      if (session.messages.length > 0) {
+        await this.memoryManager.consolidate(session.messages, this.config.agent.model);
+      }
       await this.resetSession(key);
       yield reply("Session cleared.");
       return;
@@ -47,12 +51,20 @@ export class NeovateAgent implements Agent {
       return;
     }
 
+    const keepCount = Math.floor(this.config.agent.memoryWindow / 2);
     if (this.sessionManager.messageCount(key) > this.config.agent.memoryWindow) {
       const session = this.sessionManager.get(key);
-      const oldMessages = session.messages.slice(session.lastConsolidated);
-      this.memoryManager.consolidate(oldMessages, this.config.agent.model).catch(() => {});
-      this.sessionManager.updateConsolidated(key, session.messages.length);
-      await this.resetSession(key);
+      const cutoff = session.messages.length - keepCount;
+      const oldMessages = session.messages.slice(session.lastConsolidated, cutoff);
+      if (oldMessages.length > 0) {
+        await this.memoryManager.consolidate(oldMessages, this.config.agent.model);
+      }
+      this.sessionManager.trimBefore(key, cutoff);
+      const existing = this.sessions.get(key);
+      if (existing) {
+        existing.close();
+        this.sessions.delete(key);
+      }
     }
 
     if (!this.pendingMediaMap.has(key)) {
