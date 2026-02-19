@@ -58,9 +58,21 @@ export class TelegramChannel implements Channel {
   private running = false;
   private typingIntervals = new Map<string, ReturnType<typeof setInterval>>();
   private lastSentContent = new Map<string, string>();
+  private botUsername = "";
 
   constructor(private config: TelegramConfig, private bus: MessageBus, private workspace: string) {
     this.bot = new Bot(config.token);
+  }
+
+  private isGroupChat(chatType: string): boolean {
+    return chatType === "group" || chatType === "supergroup";
+  }
+
+  private extractMention(text: string): { mentioned: boolean; cleaned: string } {
+    if (!this.botUsername) return { mentioned: false, cleaned: text };
+    const mention = `@${this.botUsername}`;
+    if (!text.includes(mention)) return { mentioned: false, cleaned: text };
+    return { mentioned: true, cleaned: text.replaceAll(mention, "").replace(/\s+/g, " ").trim() };
   }
 
   private isAllowed(senderId: string): boolean {
@@ -68,8 +80,16 @@ export class TelegramChannel implements Channel {
     return this.config.allowFrom.some((a) => senderId.includes(a));
   }
 
+  private isReplyToBot(ctx: { message?: { reply_to_message?: { from?: { id: number } } } }): boolean {
+    return ctx.message?.reply_to_message?.from?.id === this.bot.botInfo.id;
+  }
+
   async start(): Promise<void> {
     this.running = true;
+
+    const me = await this.bot.api.getMe();
+    this.botUsername = me.username ?? "";
+    console.log("[Telegram] bot username:", this.botUsername);
 
     this.bot.command("start", (ctx) => ctx.reply("neoclaw ready."));
 
@@ -89,15 +109,47 @@ export class TelegramChannel implements Channel {
 
     this.bot.on("message:text", (ctx) => {
       const senderId = `${ctx.from?.id}|${ctx.from?.username ?? ""}`;
-      if (!this.isAllowed(senderId)) return;
+      console.log("[Telegram] message:text", { text: ctx.message.text, chatType: ctx.chat.type, senderId, chatId: ctx.chat.id });
+      if (!this.isAllowed(senderId)) {
+        console.log("[Telegram] blocked by allowFrom, senderId:", senderId);
+        return;
+      }
+
+      if (this.isGroupChat(ctx.chat.type)) {
+        const { mentioned, cleaned } = this.extractMention(ctx.message.text);
+        const isReply = this.isReplyToBot(ctx);
+        console.log("[Telegram] group check", { mentioned, cleaned, isReply });
+        if (!mentioned && !isReply) return;
+        const content = mentioned ? cleaned : ctx.message.text;
+        if (!content) return;
+        this.startTyping(ctx.chat.id.toString());
+        this.publishInbound(ctx.chat.id.toString(), senderId, content, []);
+        return;
+      }
+
       this.startTyping(ctx.chat.id.toString());
       this.publishInbound(ctx.chat.id.toString(), senderId, ctx.message.text, []);
     });
 
     this.bot.on("message:photo", async (ctx) => {
       const senderId = `${ctx.from?.id}|${ctx.from?.username ?? ""}`;
-      if (!this.isAllowed(senderId)) return;
+      console.log("[Telegram] message:photo", { chatType: ctx.chat.type, senderId, chatId: ctx.chat.id });
+      if (!this.isAllowed(senderId)) {
+        console.log("[Telegram] blocked by allowFrom, senderId:", senderId);
+        return;
+      }
       const caption = ctx.message.caption ?? "";
+
+      if (this.isGroupChat(ctx.chat.type)) {
+        const { mentioned, cleaned } = this.extractMention(caption);
+        const isReply = this.isReplyToBot(ctx);
+        console.log("[Telegram] group photo check", { mentioned, cleaned, isReply });
+        if (!mentioned && !isReply) return;
+        this.startTyping(ctx.chat.id.toString());
+        this.publishInbound(ctx.chat.id.toString(), senderId, mentioned ? cleaned : caption, []);
+        return;
+      }
+
       this.startTyping(ctx.chat.id.toString());
       this.publishInbound(ctx.chat.id.toString(), senderId, caption, []);
     });
