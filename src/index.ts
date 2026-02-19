@@ -11,6 +11,24 @@ import { handleCronCommand } from "./commands/cron.js";
 import { handleStatusCommand } from "./commands/status.js";
 import { handleOnboardCommand } from "./commands/onboard.js";
 
+function showHelp(): void {
+  console.log(`neoclaw v0.1.0 - A multi-channel AI agent
+
+Usage: neoclaw [command] [options]
+
+Commands:
+  (default)    Start the agent
+  status       Show agent status and cron jobs
+  onboard      Initialize workspace and configuration
+  cron         Manage scheduled tasks
+  help         Show this help message
+
+Options:
+  --profile <name>  Use a named profile (~/.neoclaw-<name>)
+  --dev             Use dev profile (~/.neoclaw-dev)
+  -h, --help        Show this help message`);
+}
+
 function resolveBaseDir(argv: yargsParser.Arguments): string {
   const { profile, dev } = argv;
 
@@ -54,6 +72,11 @@ async function main(): Promise<void> {
   const argv = yargsParser(process.argv.slice(2));
   const baseDir = resolveBaseDir(argv);
   const subcommand = argv._[0] as string | undefined;
+
+  if (argv.h || argv.help || subcommand === "help") {
+    showHelp();
+    process.exit(0);
+  }
 
   if (subcommand === "status") {
     const config = loadConfig(baseDir);
