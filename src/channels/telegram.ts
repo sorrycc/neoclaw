@@ -272,10 +272,15 @@ export class TelegramChannel implements Channel {
     const commands = [
       { command: "start", description: "Start the bot" },
       { command: "new", description: "Start a new conversation" },
+      { command: "stop", description: "Stop the current agent" },
       { command: "help", description: "Show available commands" },
-      ...skills.map((s) => ({ command: s, description: s })),
+      ...skills.filter((s) => {
+        if (/^[a-z0-9_]+$/.test(s)) return true;
+        console.warn(`[Telegram] skipping skill command /${s}: only lowercase letters, digits, and underscores are allowed`);
+        return false;
+      }).map((s) => ({ command: s, description: s })),
     ];
-    this.bot.api.setMyCommands(commands).catch(() => {});
+    this.bot.api.setMyCommands(commands).then(() => console.log("[Telegram] commands registered:", commands.map(c => c.command).join(", "))).catch((e) => console.error("[Telegram] setMyCommands failed:", e));
   }
 
   private startTyping(chatId: string): void {
