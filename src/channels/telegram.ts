@@ -105,6 +105,12 @@ export class TelegramChannel implements Channel {
       this.publishInbound(ctx.chat.id.toString(), senderId, "/help", []);
     });
 
+    this.bot.command("stop", (ctx) => {
+      const senderId = `${ctx.from?.id}|${ctx.from?.username ?? ""}`;
+      if (!this.isAllowed(senderId)) return;
+      this.publishInbound(ctx.chat.id.toString(), senderId, "/stop", []);
+    });
+
     this.registerSkillCommands();
 
     this.bot.on("message:text", (ctx) => {

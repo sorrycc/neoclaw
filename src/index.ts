@@ -4,6 +4,7 @@ import { homedir } from "os";
 import pkg from "../package.json";
 import { loadConfig, ensureWorkspaceDirs } from "./config/schema.js";
 import { MessageBus } from "./bus/message-bus.js";
+import { sessionKey, type InboundMessage } from "./bus/types.js";
 import { ChannelManager } from "./channels/manager.js";
 import { NeovateAgent } from "./agent/neovate-agent.js";
 import { CronService } from "./services/cron.js";
@@ -50,22 +51,39 @@ function resolveBaseDir(argv: yargsParser.Arguments): string {
     : join(homedir(), ".neoclaw");
 }
 
+const INTERRUPT_COMMANDS = new Set(["/stop"]);
+
+async function processMsg(bus: MessageBus, agent: NeovateAgent, msg: InboundMessage): Promise<void> {
+  try {
+    for await (const response of agent.processMessage(msg)) {
+      bus.publishOutbound(response);
+    }
+  } catch (err) {
+    console.error("[main] error processing message:", err);
+    bus.publishOutbound({
+      channel: msg.channel,
+      chatId: msg.chatId,
+      content: "Sorry, an error occurred processing your message.",
+      media: [],
+      metadata: {},
+    });
+  }
+}
+
 async function mainLoop(bus: MessageBus, agent: NeovateAgent): Promise<void> {
+  const running = new Map<string, Promise<void>>();
+
   while (true) {
     const msg = await bus.consumeInbound();
-    try {
-      for await (const response of agent.processMessage(msg)) {
-        bus.publishOutbound(response);
-      }
-    } catch (err) {
-      console.error("[main] error processing message:", err);
-      bus.publishOutbound({
-        channel: msg.channel,
-        chatId: msg.chatId,
-        content: "Sorry, an error occurred processing your message.",
-        media: [],
-        metadata: {},
-      });
+    const key = sessionKey(msg);
+
+    if (INTERRUPT_COMMANDS.has(msg.content)) {
+      processMsg(bus, agent, msg);
+    } else {
+      const prev = running.get(key) ?? Promise.resolve();
+      const next = prev.then(() => processMsg(bus, agent, msg));
+      running.set(key, next);
+      next.then(() => { if (running.get(key) === next) running.delete(key); });
     }
   }
 }

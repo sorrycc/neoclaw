@@ -43,10 +43,23 @@ export class NeovateAgent implements Agent {
       return;
     }
 
+    if (msg.content === "/stop") {
+      const session = this.sessions.get(key);
+      if (session) {
+        // @ts-ignore
+        // wait for next version of @neovate/code
+        await session.abort();
+        yield reply("Agent stopped.");
+      } else {
+        yield reply("No active session.");
+      }
+      return;
+    }
+
     if (msg.content === "/help") {
       const skills = this.getSkillNames();
       const skillLines = skills.map((s) => `/${s}`).join("\n");
-      const base = "Commands:\n/new - Start a new session\n/help - Show this help";
+      const base = "Commands:\n/new - Start a new session\n/stop - Stop the current agent\n/help - Show this help";
       yield reply(skillLines ? `${base}\n\nSkills:\n${skillLines}` : base);
       return;
     }
