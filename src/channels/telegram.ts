@@ -260,13 +260,22 @@ export class TelegramChannel implements Channel {
 
   private registerSkillCommands(): void {
     const skills = this.getSkillNames();
+    const validSkills: { original: string; command: string }[] = [];
     for (const name of skills) {
-      this.bot.command(name, (ctx) => {
+      const command = name.replace(/-/g, "_");
+      if (!/^[a-z0-9_]+$/.test(command)) {
+        console.warn(`[Telegram] skipping skill command /${name}: contains invalid characters`);
+        continue;
+      }
+      validSkills.push({ original: name, command });
+    }
+    for (const { original, command } of validSkills) {
+      this.bot.command(command, (ctx) => {
         const senderId = `${ctx.from?.id}|${ctx.from?.username ?? ""}`;
         if (!this.isAllowed(senderId)) return;
         const args = ctx.match ? ` ${ctx.match}` : "";
         this.startTyping(ctx.chat.id.toString());
-        this.publishInbound(ctx.chat.id.toString(), senderId, `/${name}${args}`, []);
+        this.publishInbound(ctx.chat.id.toString(), senderId, `/${original}${args}`, []);
       });
     }
     const commands = [
@@ -274,11 +283,7 @@ export class TelegramChannel implements Channel {
       { command: "new", description: "Start a new conversation" },
       { command: "stop", description: "Stop the current agent" },
       { command: "help", description: "Show available commands" },
-      ...skills.filter((s) => {
-        if (/^[a-z0-9_]+$/.test(s)) return true;
-        console.warn(`[Telegram] skipping skill command /${s}: only lowercase letters, digits, and underscores are allowed`);
-        return false;
-      }).map((s) => ({ command: s, description: s })),
+      ...validSkills.map((s) => ({ command: s.command, description: s.original })),
     ];
     this.bot.api.setMyCommands(commands).then(() => console.log("[Telegram] commands registered:", commands.map(c => c.command).join(", "))).catch((e) => console.error("[Telegram] setMyCommands failed:", e));
   }
