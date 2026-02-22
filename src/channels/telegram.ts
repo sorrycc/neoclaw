@@ -1,7 +1,8 @@
 import { Bot, InputFile } from "grammy";
 import type { InputMediaPhoto } from "grammy/types";
 import { join } from "path";
-import { readdirSync, existsSync, statSync } from "fs";
+import { readdirSync, existsSync, statSync, mkdirSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
 import type { Channel } from "./channel.js";
 import type { MessageBus } from "../bus/message-bus.js";
 import type { TelegramConfig } from "../config/schema.js";
@@ -146,18 +147,20 @@ export class TelegramChannel implements Channel {
       }
       const caption = ctx.message.caption ?? "";
 
+      const media = await this.downloadPhoto(ctx.message.photo);
+
       if (this.isGroupChat(ctx.chat.type)) {
         const { mentioned, cleaned } = this.extractMention(caption);
         const isReply = this.isReplyToBot(ctx);
         console.log("[Telegram] group photo check", { mentioned, cleaned, isReply });
         if (!mentioned && !isReply) return;
         this.startTyping(ctx.chat.id.toString());
-        this.publishInbound(ctx.chat.id.toString(), senderId, mentioned ? cleaned : caption, []);
+        this.publishInbound(ctx.chat.id.toString(), senderId, mentioned ? cleaned : caption, media);
         return;
       }
 
       this.startTyping(ctx.chat.id.toString());
-      this.publishInbound(ctx.chat.id.toString(), senderId, caption, []);
+      this.publishInbound(ctx.chat.id.toString(), senderId, caption, media);
     });
 
     await this.bot.start({ drop_pending_updates: true });
@@ -286,6 +289,30 @@ export class TelegramChannel implements Channel {
       ...validSkills.map((s) => ({ command: s.command, description: s.original })),
     ];
     this.bot.api.setMyCommands(commands).then(() => console.log("[Telegram] commands registered:", commands.map(c => c.command).join(", "))).catch((e) => console.error("[Telegram] setMyCommands failed:", e));
+  }
+
+  private async downloadPhoto(photos: { file_id: string }[]): Promise<string[]> {
+    try {
+      const photo = photos[photos.length - 1];
+      const file = await this.bot.api.getFile(photo.file_id);
+      const url = `https://api.telegram.org/file/bot${this.config.token}/${file.file_path}`;
+      const res = await fetch(url);
+      if (!res.ok) {
+        console.error("[Telegram] photo download failed:", res.status);
+        return [];
+      }
+      const buffer = Buffer.from(await res.arrayBuffer());
+      const ext = (file.file_path ?? "").split(".").pop()?.toLowerCase() ?? "jpg";
+      const tmpDir = join(tmpdir(), "neoclaw");
+      mkdirSync(tmpDir, { recursive: true });
+      const filePath = join(tmpDir, `photo_${crypto.randomUUID()}.${ext}`);
+      writeFileSync(filePath, buffer);
+      console.log("[Telegram] photo saved:", filePath);
+      return [filePath];
+    } catch (e) {
+      console.error("[Telegram] photo download error:", e);
+      return [];
+    }
   }
 
   private startTyping(chatId: string): void {

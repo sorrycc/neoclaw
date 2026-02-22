@@ -1,5 +1,6 @@
 import { join } from "path";
-import { readdirSync, existsSync, statSync } from "fs";
+import { readdirSync, existsSync, statSync, readFileSync } from "fs";
+import { extname } from "path";
 import { createSession, type SDKSession } from "@neovate/code";
 import type { Agent } from "./agent.js";
 import type { InboundMessage, OutboundMessage } from "../bus/types.js";
@@ -120,7 +121,31 @@ export class NeovateAgent implements Agent {
 
     this.sessionManager.append(key, "user", msg.content);
 
-    await sdkSession.send(msg.content);
+    if (msg.media.length > 0) {
+      const mimeMap: Record<string, string> = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp" };
+      const parts: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> = [];
+      const pathList = msg.media.map((p) => `[Image: ${p}]`).join("\n");
+      parts.push({ type: "text", text: `${pathList}${msg.content ? `\n${msg.content}` : ""}` });
+      for (const filePath of msg.media) {
+        try {
+          const buffer = readFileSync(filePath);
+          const ext = extname(filePath).toLowerCase();
+          const mimeType = mimeMap[ext] ?? "image/jpeg";
+          parts.push({ type: "image", data: buffer.toString("base64"), mimeType });
+        } catch (e) {
+          console.error(`[agent] failed to read media file: ${filePath}`, e);
+        }
+      }
+      await sdkSession.send({
+        type: "user",
+        message: parts,
+        parentUuid: null,
+        uuid: crypto.randomUUID(),
+        sessionId: (sdkSession as any).sessionId,
+      });
+    } else {
+      await sdkSession.send(msg.content);
+    }
 
     let finalContent = "";
     for await (const m of sdkSession.receive()) {
