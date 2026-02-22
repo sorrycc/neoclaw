@@ -123,11 +123,13 @@ export class NeovateAgent implements Agent {
 
     this.sessionManager.append(key, "user", msg.content);
 
+    const messageContent = this.resolveSkillCommand(msg.content) ?? msg.content;
+
     if (msg.media.length > 0) {
       const mimeMap: Record<string, string> = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp" };
       const parts: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> = [];
       const pathList = msg.media.map((p) => `[Image: ${p}]`).join("\n");
-      parts.push({ type: "text", text: `${pathList}${msg.content ? `\n${msg.content}` : ""}` });
+      parts.push({ type: "text", text: `${pathList}${messageContent ? `\n${messageContent}` : ""}` });
       for (const filePath of msg.media) {
         try {
           const buffer = readFileSync(filePath);
@@ -146,7 +148,7 @@ export class NeovateAgent implements Agent {
         sessionId: (sdkSession as any).sessionId,
       });
     } else {
-      await sdkSession.send(msg.content);
+      await sdkSession.send(messageContent);
     }
 
     let finalContent = "";
@@ -210,6 +212,31 @@ export class NeovateAgent implements Agent {
       const skillPath = join(skillsDir, entry);
       return statSync(skillPath).isDirectory() && existsSync(join(skillPath, "SKILL.md"));
     });
+  }
+
+  private resolveSkillCommand(content: string): string | null {
+    if (!content.startsWith("/")) return null;
+    const spaceIdx = content.indexOf(" ");
+    const command = spaceIdx === -1 ? content.slice(1) : content.slice(1, spaceIdx);
+    const args = spaceIdx === -1 ? "" : content.slice(spaceIdx + 1).trim();
+    const skillDir = join(this.config.agent.workspace, "skills", command);
+    const skillFile = join(skillDir, "SKILL.md");
+    if (!existsSync(skillFile)) return null;
+    const raw = readFileSync(skillFile, "utf-8");
+    const body = raw.replace(/^---[\s\S]*?---\n*/, "").trim();
+    let prompt = `Base directory for this skill: ${skillDir}\n\n${body}`;
+    const hasPositional = /\$[1-9]\d*/.test(prompt);
+    if (hasPositional) {
+      const parsed = args.split(" ");
+      for (let i = 0; i < parsed.length; i++) {
+        prompt = prompt.replace(new RegExp(`\\$${i + 1}\\b`, "g"), parsed[i] || "");
+      }
+    } else if (prompt.includes("$ARGUMENTS")) {
+      prompt = prompt.replace(/\$ARGUMENTS/g, args || "");
+    } else if (args) {
+      prompt += `\n\nArguments: ${args}`;
+    }
+    return prompt;
   }
 
   private async resetSession(key: string): Promise<void> {
