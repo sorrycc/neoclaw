@@ -38,7 +38,8 @@ export class NeovateAgent implements Agent {
     if (msg.content === "/new") {
       const session = this.sessionManager.get(key);
       if (session.messages.length > 0) {
-        await this.memoryManager.consolidate(session.messages, this.config.agent.model);
+        // Fire-and-forget: don't block session reset on slow memory consolidation
+        this.memoryManager.consolidate(session.messages, this.config.agent.model).catch(console.error);
       }
       await this.resetSession(key);
       yield reply("Session cleared.");
