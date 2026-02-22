@@ -12,6 +12,7 @@ import type { Config } from "../config/schema.js";
 import type { CronService } from "../services/cron.js";
 import { createCronTool } from "./tools/cron.js";
 import { createSendFileTool } from "./tools/send-file.js";
+import { createCodeTool } from "./tools/code.js";
 
 export class NeovateAgent implements Agent {
   private sessions = new Map<string, SDKSession>();
@@ -91,6 +92,7 @@ export class NeovateAgent implements Agent {
       const systemContext = this.contextBuilder.getSystemContext(msg.channel, msg.chatId);
       const cronTool = createCronTool({ cronService: this.cronService, channel: msg.channel, chatId: msg.chatId });
       const sendFileTool = createSendFileTool({ pendingMedia, workspace: this.config.agent.workspace });
+      const codeTool = createCodeTool({ config: this.config });
       sdkSession = await createSession({
         model: this.config.agent.model,
         cwd: this.config.agent.workspace,
@@ -111,7 +113,7 @@ export class NeovateAgent implements Agent {
               return `${original}\n\n${systemContext}`;
             },
             tool() {
-              return [cronTool, sendFileTool];
+              return [cronTool, sendFileTool, codeTool];
             },
           }
         ],

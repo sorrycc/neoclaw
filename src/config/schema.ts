@@ -20,6 +20,7 @@ export interface ChannelsConfig {
 
 export interface AgentConfig {
   model: string;
+  codeModel?: string;
   temperature: number;
   maxTokens: number;
   memoryWindow: number;
@@ -102,6 +103,7 @@ export function ensureWorkspaceDirs(workspace: string): void {
     workspace,
     join(workspace, "skills"),
     join(workspace, "memory"),
+    join(workspace, "logs"),
   ];
   for (const d of dirs) mkdirSync(d, { recursive: true });
 }
