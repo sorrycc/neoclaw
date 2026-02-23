@@ -127,16 +127,25 @@ export class NeovateAgent implements Agent {
     const messageContent = this.resolveSkillCommand(msg.content) ?? msg.content;
 
     if (msg.media.length > 0) {
-      const mimeMap: Record<string, string> = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp" };
+      const imageMimes: Record<string, string> = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp" };
       const parts: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> = [];
-      const pathList = msg.media.map((p) => `[Image: ${p}]`).join("\n");
-      parts.push({ type: "text", text: `${pathList}${messageContent ? `\n${messageContent}` : ""}` });
-      for (const filePath of msg.media) {
+      const images: string[] = [];
+      const files: string[] = [];
+      for (const p of msg.media) {
+        const ext = extname(p).toLowerCase();
+        if (ext in imageMimes) images.push(p);
+        else files.push(p);
+      }
+      const labels = [
+        ...images.map((p) => `[Image: ${p}]`),
+        ...files.map((p) => `[File: ${p}]`),
+      ];
+      parts.push({ type: "text", text: `${labels.join("\n")}${messageContent ? `\n${messageContent}` : ""}` });
+      for (const filePath of images) {
         try {
           const buffer = readFileSync(filePath);
           const ext = extname(filePath).toLowerCase();
-          const mimeType = mimeMap[ext] ?? "image/jpeg";
-          parts.push({ type: "image", data: buffer.toString("base64"), mimeType });
+          parts.push({ type: "image", data: buffer.toString("base64"), mimeType: imageMimes[ext] });
         } catch (e) {
           console.error(`[agent] failed to read media file: ${filePath}`, e);
         }

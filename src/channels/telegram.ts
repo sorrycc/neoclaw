@@ -1,5 +1,5 @@
 import { Bot, InputFile } from "grammy";
-import type { InputMediaPhoto } from "grammy/types";
+import type { InputMediaPhoto, InputMediaDocument, InputMediaVideo, InputMediaAudio } from "grammy/types";
 import { join } from "path";
 import { readdirSync, existsSync, statSync, mkdirSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
@@ -51,6 +51,23 @@ function isUrl(s: string): boolean {
 
 function toMediaSource(s: string): string | InputFile {
   return isUrl(s) ? s : new InputFile(s);
+}
+
+const IMAGE_EXTS = new Set(["jpg", "jpeg", "png", "gif", "webp"]);
+const VIDEO_EXTS = new Set(["mp4", "mov", "avi", "mkv", "webm"]);
+const AUDIO_EXTS = new Set(["mp3", "ogg", "wav", "flac", "m4a", "aac"]);
+
+function extOf(path: string): string {
+  const url = isUrl(path) ? new URL(path).pathname : path;
+  return (url.split(".").pop() ?? "").toLowerCase();
+}
+
+function mediaType(path: string): "photo" | "video" | "audio" | "document" {
+  const ext = extOf(path);
+  if (IMAGE_EXTS.has(ext)) return "photo";
+  if (VIDEO_EXTS.has(ext)) return "video";
+  if (AUDIO_EXTS.has(ext)) return "audio";
+  return "document";
 }
 
 export class TelegramChannel implements Channel {
@@ -147,7 +164,7 @@ export class TelegramChannel implements Channel {
       }
       const caption = ctx.message.caption ?? "";
 
-      const media = await this.downloadPhoto(ctx.message.photo);
+      const media = await this.downloadFile(ctx.message.photo[ctx.message.photo.length - 1].file_id, "jpg");
 
       if (this.isGroupChat(ctx.chat.type)) {
         const { mentioned, cleaned } = this.extractMention(caption);
@@ -161,6 +178,35 @@ export class TelegramChannel implements Channel {
 
       this.startTyping(ctx.chat.id.toString());
       this.publishInbound(ctx.chat.id.toString(), senderId, caption, media);
+    });
+
+    this.bot.on("message:document", async (ctx) => {
+      const senderId = `${ctx.from?.id}|${ctx.from?.username ?? ""}`;
+      console.log("[Telegram] message:document", { chatType: ctx.chat.type, senderId, chatId: ctx.chat.id });
+      if (!this.isAllowed(senderId)) return;
+      const caption = ctx.message.caption ?? "";
+      const doc = ctx.message.document;
+      const media = await this.downloadFile(doc.file_id, "bin", doc.file_name ?? undefined);
+      this.handleInboundMedia(ctx, senderId, caption, media);
+    });
+
+    this.bot.on("message:video", async (ctx) => {
+      const senderId = `${ctx.from?.id}|${ctx.from?.username ?? ""}`;
+      console.log("[Telegram] message:video", { chatType: ctx.chat.type, senderId, chatId: ctx.chat.id });
+      if (!this.isAllowed(senderId)) return;
+      const caption = ctx.message.caption ?? "";
+      const media = await this.downloadFile(ctx.message.video.file_id, "mp4");
+      this.handleInboundMedia(ctx, senderId, caption, media);
+    });
+
+    this.bot.on("message:audio", async (ctx) => {
+      const senderId = `${ctx.from?.id}|${ctx.from?.username ?? ""}`;
+      console.log("[Telegram] message:audio", { chatType: ctx.chat.type, senderId, chatId: ctx.chat.id });
+      if (!this.isAllowed(senderId)) return;
+      const caption = ctx.message.caption ?? "";
+      const audio = ctx.message.audio;
+      const media = await this.downloadFile(audio.file_id, "mp3", audio.file_name ?? undefined);
+      this.handleInboundMedia(ctx, senderId, caption, media);
     });
 
     await this.bot.start({ drop_pending_updates: true });
@@ -204,39 +250,61 @@ export class TelegramChannel implements Channel {
   private async sendWithMedia(chatId: number, msg: OutboundMessage): Promise<void> {
     const html = msg.content ? mdToTelegramHtml(msg.content) : "";
     const captionFits = html.length <= CAPTION_LIMIT;
+    const captionOpts = (useHtml: boolean) =>
+      captionFits && msg.content
+        ? useHtml && html
+          ? { caption: html, parse_mode: "HTML" as const }
+          : { caption: msg.content }
+        : {};
 
     if (msg.media.length === 1) {
-      const source = toMediaSource(msg.media[0]);
+      const path = msg.media[0];
+      const source = toMediaSource(path);
+      const type = mediaType(path);
+      const send = async (opts: Record<string, unknown>) => {
+        if (type === "photo") await this.bot.api.sendPhoto(chatId, source, opts);
+        else if (type === "video") await this.bot.api.sendVideo(chatId, source, opts);
+        else if (type === "audio") await this.bot.api.sendAudio(chatId, source, opts);
+        else await this.bot.api.sendDocument(chatId, source, opts);
+      };
       try {
-        await this.bot.api.sendPhoto(chatId, source, {
-          ...(captionFits && html ? { caption: html, parse_mode: "HTML" } : {}),
-        });
+        await send(captionOpts(true));
       } catch {
-        await this.bot.api.sendPhoto(chatId, source, {
-          ...(captionFits && msg.content ? { caption: msg.content } : {}),
-        });
+        await send(captionOpts(false));
       }
     } else {
-      const group: InputMediaPhoto[] = msg.media.map((m, i) => ({
-        type: "photo" as const,
-        media: isUrl(m) ? m : new InputFile(m),
-        ...(i === 0 && captionFits && html ? { caption: html, parse_mode: "HTML" as const } : {}),
-      }));
+      const toGroupItem = (m: string, i: number, useHtml: boolean) => {
+        const type = mediaType(m);
+        const base = { media: isUrl(m) ? m : new InputFile(m) };
+        const cap = i === 0 ? captionOpts(useHtml) : {};
+        if (type === "video") return { type: "video" as const, ...base, ...cap };
+        if (type === "audio") return { type: "audio" as const, ...base, ...cap };
+        if (type === "photo") return { type: "photo" as const, ...base, ...cap };
+        return { type: "document" as const, ...base, ...cap };
+      };
       try {
-        await this.bot.api.sendMediaGroup(chatId, group);
+        await this.bot.api.sendMediaGroup(chatId, msg.media.map((m, i) => toGroupItem(m, i, true)));
       } catch {
-        const fallback: InputMediaPhoto[] = msg.media.map((m, i) => ({
-          type: "photo" as const,
-          media: isUrl(m) ? m : new InputFile(m),
-          ...(i === 0 && captionFits && msg.content ? { caption: msg.content } : {}),
-        }));
-        await this.bot.api.sendMediaGroup(chatId, fallback);
+        await this.bot.api.sendMediaGroup(chatId, msg.media.map((m, i) => toGroupItem(m, i, false)));
       }
     }
 
     if (!captionFits && msg.content) {
       await this.sendText(chatId, msg.content);
     }
+  }
+
+  private handleInboundMedia(ctx: { chat: { id: number; type: string }; message?: { reply_to_message?: { from?: { id: number } } } }, senderId: string, caption: string, media: string[]): void {
+    if (this.isGroupChat(ctx.chat.type)) {
+      const { mentioned, cleaned } = this.extractMention(caption);
+      const isReply = this.isReplyToBot(ctx);
+      if (!mentioned && !isReply) return;
+      this.startTyping(ctx.chat.id.toString());
+      this.publishInbound(ctx.chat.id.toString(), senderId, mentioned ? cleaned : caption, media);
+      return;
+    }
+    this.startTyping(ctx.chat.id.toString());
+    this.publishInbound(ctx.chat.id.toString(), senderId, caption, media);
   }
 
   private publishInbound(chatId: string, senderId: string, content: string, media: string[]): void {
@@ -291,26 +359,26 @@ export class TelegramChannel implements Channel {
     this.bot.api.setMyCommands(commands).then(() => console.log("[Telegram] commands registered:", commands.map(c => c.command).join(", "))).catch((e) => console.error("[Telegram] setMyCommands failed:", e));
   }
 
-  private async downloadPhoto(photos: { file_id: string }[]): Promise<string[]> {
+  private async downloadFile(fileId: string, fallbackExt = "bin", fileName?: string): Promise<string[]> {
     try {
-      const photo = photos[photos.length - 1];
-      const file = await this.bot.api.getFile(photo.file_id);
+      const file = await this.bot.api.getFile(fileId);
       const url = `https://api.telegram.org/file/bot${this.config.token}/${file.file_path}`;
       const res = await fetch(url);
       if (!res.ok) {
-        console.error("[Telegram] photo download failed:", res.status);
+        console.error("[Telegram] file download failed:", res.status);
         return [];
       }
       const buffer = Buffer.from(await res.arrayBuffer());
-      const ext = (file.file_path ?? "").split(".").pop()?.toLowerCase() ?? "jpg";
+      const ext = (file.file_path ?? "").split(".").pop()?.toLowerCase() ?? fallbackExt;
       const tmpDir = join(tmpdir(), "neoclaw");
       mkdirSync(tmpDir, { recursive: true });
-      const filePath = join(tmpDir, `photo_${crypto.randomUUID()}.${ext}`);
+      const name = fileName ?? `file_${crypto.randomUUID()}.${ext}`;
+      const filePath = join(tmpDir, name);
       writeFileSync(filePath, buffer);
-      console.log("[Telegram] photo saved:", filePath);
+      console.log("[Telegram] file saved:", filePath);
       return [filePath];
     } catch (e) {
-      console.error("[Telegram] photo download error:", e);
+      console.error("[Telegram] file download error:", e);
       return [];
     }
   }
