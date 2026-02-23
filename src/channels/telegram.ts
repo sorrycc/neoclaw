@@ -14,12 +14,12 @@ function mdToTelegramHtml(md: string): string {
 
   let text = md.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
     codeBlocks.push(`<pre><code${lang ? ` class="language-${lang}"` : ""}>${escapeHtml(code.trimEnd())}</code></pre>`);
-    return `%%CODEBLOCK_${codeBlocks.length - 1}%%`;
+    return `%%CODEBLOCK${codeBlocks.length - 1}%%`;
   });
 
   text = text.replace(/`([^`]+)`/g, (_, code) => {
     inlineCodes.push(`<code>${escapeHtml(code)}</code>`);
-    return `%%INLINE_${inlineCodes.length - 1}%%`;
+    return `%%INLINE${inlineCodes.length - 1}%%`;
   });
 
   text = text.replace(/^#{1,6}\s+/gm, "");
@@ -33,8 +33,8 @@ function mdToTelegramHtml(md: string): string {
   text = text.replace(/~~(.+?)~~/g, "<s>$1</s>");
   text = text.replace(/^- /gm, "• ");
 
-  text = text.replace(/%%CODEBLOCK_(\d+)%%/g, (_, i) => codeBlocks[Number(i)]);
-  text = text.replace(/%%INLINE_(\d+)%%/g, (_, i) => inlineCodes[Number(i)]);
+  text = text.replace(/%%CODEBLOCK(\d+)%%/g, (_, i) => codeBlocks[Number(i)]);
+  text = text.replace(/%%INLINE(\d+)%%/g, (_, i) => inlineCodes[Number(i)]);
 
   return text;
 }

@@ -8,7 +8,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@neovate/code": "^0.28.2",
+    "@neovate/code": "^0.28.4",
     "cron-parser": "^4.9.0",
     "grammy": "^1.31.0",
     "yargs-parser": "^22.0.0"

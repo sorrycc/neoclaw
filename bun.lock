@@ -5,7 +5,7 @@
     "": {
       "name": "neoclaw",
       "dependencies": {
-        "@neovate/code": "^0.28.2",
+        "@neovate/code": "^0.28.4",
         "cron-parser": "^4.9.0",
         "grammy": "^1.31.0",
         "yargs-parser": "^22.0.0",
@@ -20,7 +20,7 @@
   "packages": {
     "@grammyjs/types": ["@grammyjs/types@3.24.0", "", {}, "sha512-qQIEs4lN5WqUdr4aT8MeU6UFpMbGYAvcvYSW1A4OO1PABGJQHz/KLON6qvpf+5RxaNDQBxiY2k2otIhg/AG7RQ=="],
 
-    "@neovate/code": ["@neovate/code@0.28.2", "", { "bin": { "neovate": "dist/cli.mjs" } }, "sha512-bjK3FHo8H/RaAyuI64O01tCswq4BBdT2f24mRkOYeM8ek/F/4f6fRdNYAlV0kGdTem4nk06H0ra10OrLnNdRaw=="],
+    "@neovate/code": ["@neovate/code@0.28.4", "", { "bin": { "neovate": "dist/cli.mjs" } }, "sha512-R4dQvX9w7nP022lVHxdIA4XwZ95luHYMlnteS+GYW40tBso2FJ9QrVIeXnjvUF6QcjFulzR794i3nab6knb3QQ=="],
 
     "@types/bun": ["@types/bun@1.3.9", "", { "dependencies": { "bun-types": "1.3.9" } }, "sha512-KQ571yULOdWJiMH+RIWIOZ7B2RXQGpL1YQrBtLIV3FqDcCu6FsbFUBwhdKUlCKUpS3PJDsHlJ1QKlpxoVR+xtw=="],
 
