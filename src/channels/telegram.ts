@@ -1,7 +1,7 @@
 import { Bot, InputFile } from "grammy";
 import type { InputMediaPhoto, InputMediaDocument, InputMediaVideo, InputMediaAudio } from "grammy/types";
 import { join } from "path";
-import { readdirSync, existsSync, statSync, mkdirSync, writeFileSync } from "fs";
+import { readdirSync, existsSync, statSync, mkdirSync, writeFileSync, watch, type FSWatcher } from "fs";
 import { tmpdir } from "os";
 import type { Channel } from "./channel.js";
 import type { MessageBus } from "../bus/message-bus.js";
@@ -77,6 +77,8 @@ export class TelegramChannel implements Channel {
   private typingIntervals = new Map<string, ReturnType<typeof setInterval>>();
   private lastSentContent = new Map<string, string>();
   private botUsername = "";
+  private skillsWatcher: FSWatcher | null = null;
+  private skillsDebounce: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private config: TelegramConfig, private bus: MessageBus, private workspace: string) {
     this.bot = new Bot(config.token);
@@ -129,7 +131,9 @@ export class TelegramChannel implements Channel {
       this.publishInbound(ctx.chat.id.toString(), senderId, "/stop", []);
     });
 
-    this.registerSkillCommands();
+    this.registerDynamicSkillHandler();
+    this.syncSkillCommands();
+    this.watchSkillsDir();
 
     this.bot.on("message:text", (ctx) => {
       const senderId = `${ctx.from?.id}|${ctx.from?.username ?? ""}`;
@@ -214,6 +218,8 @@ export class TelegramChannel implements Channel {
 
   async stop(): Promise<void> {
     this.running = false;
+    if (this.skillsDebounce) clearTimeout(this.skillsDebounce);
+    if (this.skillsWatcher) this.skillsWatcher.close();
     for (const interval of this.typingIntervals.values()) clearInterval(interval);
     this.typingIntervals.clear();
     this.bot.stop();
@@ -329,26 +335,40 @@ export class TelegramChannel implements Channel {
     });
   }
 
-  private registerSkillCommands(): void {
-    const skills = this.getSkillNames();
-    const validSkills: { original: string; command: string }[] = [];
-    for (const name of skills) {
+  private getValidSkills(): { original: string; command: string }[] {
+    const result: { original: string; command: string }[] = [];
+    for (const name of this.getSkillNames()) {
       const command = name.replace(/-/g, "_");
       if (!/^[a-z0-9_]+$/.test(command)) {
         console.warn(`[Telegram] skipping skill command /${name}: contains invalid characters`);
         continue;
       }
-      validSkills.push({ original: name, command });
+      result.push({ original: name, command });
     }
-    for (const { original, command } of validSkills) {
-      this.bot.command(command, (ctx) => {
-        const senderId = `${ctx.from?.id}|${ctx.from?.username ?? ""}`;
-        if (!this.isAllowed(senderId)) return;
-        const args = ctx.match ? ` ${ctx.match}` : "";
-        this.startTyping(ctx.chat.id.toString());
-        this.publishInbound(ctx.chat.id.toString(), senderId, `/${original}${args}`, []);
-      });
-    }
+    return result;
+  }
+
+  private registerDynamicSkillHandler(): void {
+    const builtins = new Set(["start", "new", "help", "stop"]);
+    this.bot.on("message:text", (ctx, next) => {
+      const text = ctx.message.text;
+      if (!text.startsWith("/")) return next();
+      const parts = text.split(/\s+/);
+      const raw = parts[0].slice(1).replace(/@.*$/, "");
+      if (builtins.has(raw)) return next();
+      const skills = this.getValidSkills();
+      const match = skills.find((s) => s.command === raw);
+      if (!match) return next();
+      const senderId = `${ctx.from?.id}|${ctx.from?.username ?? ""}`;
+      if (!this.isAllowed(senderId)) return;
+      const args = parts.slice(1).join(" ");
+      this.startTyping(ctx.chat.id.toString());
+      this.publishInbound(ctx.chat.id.toString(), senderId, `/${match.original}${args ? ` ${args}` : ""}`, []);
+    });
+  }
+
+  private syncSkillCommands(): void {
+    const validSkills = this.getValidSkills();
     const commands = [
       { command: "start", description: "Start the bot" },
       { command: "new", description: "Start a new conversation" },
@@ -356,7 +376,18 @@ export class TelegramChannel implements Channel {
       { command: "help", description: "Show available commands" },
       ...validSkills.map((s) => ({ command: s.command, description: s.original })),
     ];
-    this.bot.api.setMyCommands(commands).then(() => console.log("[Telegram] commands registered:", commands.map(c => c.command).join(", "))).catch((e) => console.error("[Telegram] setMyCommands failed:", e));
+    this.bot.api.setMyCommands(commands).then(() => console.log("[Telegram] commands registered:", commands.map((c) => c.command).join(", "))).catch((e) => console.error("[Telegram] setMyCommands failed:", e));
+  }
+
+  private watchSkillsDir(): void {
+    const skillsDir = join(this.workspace, "skills");
+    if (!existsSync(skillsDir)) {
+      mkdirSync(skillsDir, { recursive: true });
+    }
+    this.skillsWatcher = watch(skillsDir, { recursive: true }, () => {
+      if (this.skillsDebounce) clearTimeout(this.skillsDebounce);
+      this.skillsDebounce = setTimeout(() => this.syncSkillCommands(), 500);
+    });
   }
 
   private async downloadFile(fileId: string, fallbackExt = "bin", fileName?: string): Promise<string[]> {
