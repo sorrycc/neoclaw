@@ -390,6 +390,11 @@ export class TelegramChannel implements Channel {
     });
   }
 
+  updateConfig(config: TelegramConfig): void {
+    this.config = config;
+    console.log(`[Telegram] config updated, allowFrom=${config.allowFrom.join(",")}`);
+  }
+
   private async downloadFile(fileId: string, fallbackExt = "bin", fileName?: string): Promise<string[]> {
     try {
       const file = await this.bot.api.getFile(fileId);

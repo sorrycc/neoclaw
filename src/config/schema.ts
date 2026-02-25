@@ -1,6 +1,6 @@
 import { join } from "path";
 import { homedir } from "os";
-import { existsSync, readFileSync, mkdirSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, mkdirSync, writeFileSync, watch, type FSWatcher } from "fs";
 
 export interface TelegramConfig {
   enabled: boolean;
@@ -96,6 +96,23 @@ export function loadConfig(baseDir: string): Config {
   }
 
   return envOverride(config);
+}
+
+export function watchConfig(baseDir: string, onChange: (config: Config) => void): FSWatcher {
+  const path = configPath(baseDir);
+  let debounce: ReturnType<typeof setTimeout> | null = null;
+  return watch(path, () => {
+    if (debounce) clearTimeout(debounce);
+    debounce = setTimeout(() => {
+      try {
+        const config = loadConfig(baseDir);
+        onChange(config);
+        console.log("[config] reloaded");
+      } catch (e) {
+        console.error("[config] reload failed:", e);
+      }
+    }, 500);
+  });
 }
 
 export function ensureWorkspaceDirs(workspace: string): void {

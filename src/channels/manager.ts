@@ -17,6 +17,13 @@ export class ChannelManager {
     }
   }
 
+  updateConfig(config: Config): void {
+    const telegram = this.channels.get("telegram");
+    if (telegram && telegram instanceof TelegramChannel) {
+      telegram.updateConfig(config.channels.telegram);
+    }
+  }
+
   async startAll(): Promise<void> {
     await Promise.all([
       ...Array.from(this.channels.values()).map((c) => c.start()),

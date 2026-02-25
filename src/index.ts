@@ -2,7 +2,7 @@ import yargsParser from "yargs-parser";
 import { join } from "path";
 import { homedir } from "os";
 import pkg from "../package.json";
-import { loadConfig, ensureWorkspaceDirs } from "./config/schema.js";
+import { loadConfig, ensureWorkspaceDirs, watchConfig } from "./config/schema.js";
 import { MessageBus } from "./bus/message-bus.js";
 import { sessionKey, type InboundMessage } from "./bus/types.js";
 import { ChannelManager } from "./channels/manager.js";
@@ -140,8 +140,14 @@ async function main(): Promise<void> {
   const channelManager = new ChannelManager(config, bus);
   const heartbeat = new HeartbeatService(config.agent.workspace, bus);
 
+  const configWatcher = watchConfig(baseDir, (newConfig) => {
+    agent.updateConfig(newConfig);
+    channelManager.updateConfig(newConfig);
+  });
+
   process.on("SIGINT", async () => {
     console.log("\n[neoclaw] shutting down...");
+    configWatcher.close();
     await channelManager.stop();
     cron.stop();
     heartbeat.stop();

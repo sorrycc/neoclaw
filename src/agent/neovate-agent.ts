@@ -249,6 +249,11 @@ export class NeovateAgent implements Agent {
     return prompt;
   }
 
+  updateConfig(config: Config): void {
+    this.config = config;
+    console.log(`[agent] config updated, model=${config.agent.model}`);
+  }
+
   private async resetSession(key: string): Promise<void> {
     const existing = this.sessions.get(key);
     if (existing) {
