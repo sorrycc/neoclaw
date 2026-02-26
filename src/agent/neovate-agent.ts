@@ -251,6 +251,10 @@ export class NeovateAgent implements Agent {
 
   updateConfig(config: Config): void {
     this.config = config;
+    for (const [key, session] of this.sessions) {
+      session.close();
+      this.sessions.delete(key);
+    }
     console.log(`[agent] config updated, model=${config.agent.model}`);
   }
 
