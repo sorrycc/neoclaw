@@ -17,8 +17,8 @@ const TEMPLATES: Record<string, string> = {
   "memory/MEMORY.md": "memory/MEMORY.md",
 };
 
-function bundledTemplatePath(name: string): string {
-  return join(dirname(dirname(__dirname)), "workspace", name);
+function bundledTemplatePath(pkgRoot: string, name: string): string {
+  return join(pkgRoot, "workspace", name);
 }
 
 function askYesNo(question: string): Promise<boolean> {
@@ -40,7 +40,7 @@ function profileFlag(baseDir: string): string {
   return m ? ` --profile ${m[1]}` : "";
 }
 
-export async function handleOnboardCommand(baseDir: string): Promise<void> {
+export async function handleOnboardCommand(baseDir: string, pkgRoot: string): Promise<void> {
   const cfgPath = configPath(baseDir);
   const defaults = defaultConfig(baseDir);
 
@@ -74,14 +74,14 @@ export async function handleOnboardCommand(baseDir: string): Promise<void> {
   for (const [dest, src] of Object.entries(TEMPLATES)) {
     const target = join(workspace, dest);
     if (existsSync(target)) continue;
-    const srcPath = bundledTemplatePath(src);
+    const srcPath = bundledTemplatePath(pkgRoot, src);
     if (!existsSync(srcPath)) continue;
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, readFileSync(srcPath, "utf-8"));
     console.log(`  Created ${dest}`);
   }
 
-  const bundledSkills = bundledTemplatePath("skills");
+  const bundledSkills = bundledTemplatePath(pkgRoot, "skills");
   if (existsSync(bundledSkills)) {
     const targetSkills = join(workspace, "skills");
     for (const name of readdirSync(bundledSkills)) {

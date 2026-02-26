@@ -1,8 +1,11 @@
 import yargsParser from "yargs-parser";
-import { join } from "path";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 import { homedir } from "os";
 import { existsSync } from "fs";
 import pkg from "../package.json";
+
+const __pkgRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 import { loadConfig, ensureWorkspaceDirs, watchConfig } from "./config/schema.js";
 import { MessageBus } from "./bus/message-bus.js";
 import { sessionKey, type InboundMessage } from "./bus/types.js";
@@ -114,7 +117,7 @@ async function main(): Promise<void> {
   }
 
   if (subcommand === "onboard") {
-    await handleOnboardCommand(baseDir);
+    await handleOnboardCommand(baseDir, __pkgRoot);
     process.exit(0);
   }
 

@@ -1,7 +1,8 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { randomUUID } from "crypto";
-import { parseExpression } from "cron-parser";
+import cronParser from "cron-parser";
+const { parseExpression } = cronParser;
 import type { MessageBus } from "../bus/message-bus.js";
 import type { InboundMessage } from "../bus/types.js";
 
