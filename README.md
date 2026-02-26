@@ -1,5 +1,9 @@
 # neoclaw
 
+[![](https://img.shields.io/npm/v/neoclaw)](https://www.npmjs.com/package/neoclaw)
+[![](https://img.shields.io/npm/dm/neoclaw)](https://www.npmjs.com/package/neoclaw)
+[![](https://img.shields.io/npm/l/neoclaw)](https://www.npmjs.com/package/neoclaw)
+
 A multi-channel AI agent built with [Neovate Code](https://github.com/neovate-code/neovate-code).
 
 ## Features
