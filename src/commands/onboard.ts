@@ -31,6 +31,15 @@ function askYesNo(question: string): Promise<boolean> {
   });
 }
 
+function profileFlag(baseDir: string): string {
+  const base = baseDir.replace(/\/$/, "");
+  const name = base.split("/").pop() ?? "";
+  if (name === ".neoclaw") return "";
+  if (name === ".neoclaw-dev") return " --dev";
+  const m = name.match(/^\.neoclaw-(.+)$/);
+  return m ? ` --profile ${m[1]}` : "";
+}
+
 export async function handleOnboardCommand(baseDir: string): Promise<void> {
   const cfgPath = configPath(baseDir);
   const defaults = defaultConfig(baseDir);
@@ -83,8 +92,9 @@ export async function handleOnboardCommand(baseDir: string): Promise<void> {
     }
   }
 
+  const flag = profileFlag(baseDir);
   console.log("\n[neoclaw] ready!");
   console.log("\nNext steps:");
   console.log("  1. Edit config at " + cfgPath);
-  console.log("  2. Run: bun start");
+  console.log(`  2. Run: neoclaw${flag}`);
 }

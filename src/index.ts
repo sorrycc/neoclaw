@@ -1,6 +1,7 @@
 import yargsParser from "yargs-parser";
 import { join } from "path";
 import { homedir } from "os";
+import { existsSync } from "fs";
 import pkg from "../package.json";
 import { loadConfig, ensureWorkspaceDirs, watchConfig } from "./config/schema.js";
 import { MessageBus } from "./bus/message-bus.js";
@@ -125,6 +126,12 @@ async function main(): Promise<void> {
     const args = argv._.slice(1).map(String);
     console.log(handleCronCommand(cron, args));
     process.exit(0);
+  }
+
+  if (!existsSync(baseDir)) {
+    console.error(`[neoclaw] profile not initialized at ${baseDir}`);
+    console.error(`Run: neoclaw onboard${argv.profile ? ` --profile ${argv.profile}` : argv.dev ? " --dev" : ""}`);
+    process.exit(1);
   }
 
   const config = loadConfig(baseDir);
