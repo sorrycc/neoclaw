@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, cpSync, readdirSync } from "fs";
 import { join, dirname } from "path";
 import { createInterface } from "readline";
 import {
@@ -70,6 +70,17 @@ export async function handleOnboardCommand(baseDir: string): Promise<void> {
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, readFileSync(srcPath, "utf-8"));
     console.log(`  Created ${dest}`);
+  }
+
+  const bundledSkills = bundledTemplatePath("skills");
+  if (existsSync(bundledSkills)) {
+    const targetSkills = join(workspace, "skills");
+    for (const name of readdirSync(bundledSkills)) {
+      const dest = join(targetSkills, name);
+      if (existsSync(dest)) continue;
+      cpSync(join(bundledSkills, name), dest, { recursive: true });
+      console.log(`  Created skills/${name}`);
+    }
   }
 
   console.log("\n[neoclaw] ready!");
