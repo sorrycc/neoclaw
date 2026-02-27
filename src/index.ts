@@ -119,7 +119,14 @@ async function main(): Promise<void> {
   }
 
   if (subcommand === "onboard") {
-    await handleOnboardCommand(baseDir, __pkgRoot);
+    const flag = argv.profile ? ` --profile ${argv.profile}` : argv.dev ? " --dev" : "";
+    const result = await handleOnboardCommand({
+      baseDir,
+      pkgRoot: __pkgRoot,
+      profileFlag: flag,
+      force: !!(argv.yes || argv.y),
+    });
+    console.log(result);
     process.exit(0);
   }
 
