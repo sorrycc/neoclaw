@@ -46,7 +46,7 @@ export class ChannelManager {
         try {
           await channel.send(msg);
         } catch (err) {
-          logger.error("dispatch", `failed to send to ${msg.channel}:`, err);
+          logger.error("dispatch", `failed to send to ${msg.channel} chatId=${msg.chatId}:`, err);
         }
       }
     }

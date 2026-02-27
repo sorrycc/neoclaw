@@ -2,6 +2,7 @@ import { join } from "path";
 import { existsSync, readFileSync } from "fs";
 import type { MessageBus } from "../bus/message-bus.js";
 import type { InboundMessage } from "../bus/types.js";
+import { logger } from "../logger.js";
 
 export class HeartbeatService {
   private running = false;
@@ -14,6 +15,7 @@ export class HeartbeatService {
 
   async start(): Promise<void> {
     this.running = true;
+    logger.info("heartbeat", `started, interval=${this.intervalMs}ms`);
 
     while (this.running) {
       await new Promise((r) => setTimeout(r, this.intervalMs));
@@ -24,6 +26,8 @@ export class HeartbeatService {
 
       const content = readFileSync(heartbeatPath, "utf-8").trim();
       if (!content) continue;
+
+      logger.debug("heartbeat", "fired");
 
       const msg: InboundMessage = {
         channel: "system",

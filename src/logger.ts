@@ -1,7 +1,7 @@
 const LEVELS = { debug: 0, info: 1, warn: 2, error: 3 } as const;
 type LogLevel = keyof typeof LEVELS;
 
-let current: LogLevel = "info";
+let current: LogLevel = "debug";
 
 function isLevel(s: string): s is LogLevel {
   return s in LEVELS;
@@ -13,8 +13,8 @@ export function setLevel(level: string): void {
 
 function log(level: LogLevel, tag: string, ...args: unknown[]): void {
   if (LEVELS[level] < LEVELS[current]) return;
-  const fn = level === "error" ? console.error : level === "warn" ? console.warn : console.error;
-  fn(`[${tag}]`, ...args);
+  const fn = level === "error" ? console.error : level === "warn" ? console.warn : console.log;
+  fn(`${new Date().toISOString()} [${level.toUpperCase()}] [${tag}]`, ...args);
 }
 
 export const logger = {

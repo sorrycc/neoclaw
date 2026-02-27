@@ -138,7 +138,7 @@ export class TelegramChannel implements Channel {
 
     this.bot.on("message:text", (ctx) => {
       const senderId = `${ctx.from?.id}|${ctx.from?.username ?? ""}`;
-      logger.debug("telegram", "message:text", { text: ctx.message.text, chatType: ctx.chat.type, senderId, chatId: ctx.chat.id });
+      logger.debug("telegram", "message:text", { text: ctx.message.text.slice(0, 100), chatType: ctx.chat.type, senderId, chatId: ctx.chat.id });
       if (!this.isAllowed(senderId)) {
         logger.debug("telegram", "blocked by allowFrom, senderId:", senderId);
         return;
@@ -249,8 +249,13 @@ export class TelegramChannel implements Channel {
     const html = mdToTelegramHtml(content);
     try {
       await this.bot.api.sendMessage(chatId, html, { parse_mode: "HTML" });
-    } catch {
-      await this.bot.api.sendMessage(chatId, content);
+    } catch (e) {
+      logger.warn("telegram", `HTML send failed, falling back to plain text, chatId=${chatId}`, e);
+      try {
+        await this.bot.api.sendMessage(chatId, content);
+      } catch (e2) {
+        logger.error("telegram", `plain text send also failed, chatId=${chatId}`, e2);
+      }
     }
   }
 
@@ -276,7 +281,8 @@ export class TelegramChannel implements Channel {
       };
       try {
         await send(captionOpts(true));
-      } catch {
+      } catch (e) {
+        logger.warn("telegram", `HTML media send failed, falling back to plain text, chatId=${chatId}`, e);
         await send(captionOpts(false));
       }
     } else {
@@ -291,7 +297,8 @@ export class TelegramChannel implements Channel {
       };
       try {
         await this.bot.api.sendMediaGroup(chatId, msg.media.map((m, i) => toGroupItem(m, i, true)));
-      } catch {
+      } catch (e) {
+        logger.warn("telegram", `HTML media group send failed, falling back to plain text, chatId=${chatId}`, e);
         await this.bot.api.sendMediaGroup(chatId, msg.media.map((m, i) => toGroupItem(m, i, false)));
       }
     }
@@ -402,7 +409,7 @@ export class TelegramChannel implements Channel {
       const url = `https://api.telegram.org/file/bot${this.config.token}/${file.file_path}`;
       const res = await fetch(url);
       if (!res.ok) {
-        logger.error("telegram", "file download failed:", res.status);
+        logger.error("telegram", `file download failed: fileId=${fileId} status=${res.status}`);
         return [];
       }
       const buffer = Buffer.from(await res.arrayBuffer());
@@ -412,10 +419,10 @@ export class TelegramChannel implements Channel {
       const name = fileName ?? `file_${crypto.randomUUID()}.${ext}`;
       const filePath = join(tmpDir, name);
       writeFileSync(filePath, buffer);
-      logger.debug("telegram", "file saved:", filePath);
+      logger.debug("telegram", `file saved: fileId=${fileId} path=${filePath}`);
       return [filePath];
     } catch (e) {
-      logger.error("telegram", "file download error:", e);
+      logger.error("telegram", `file download error: fileId=${fileId}`, e);
       return [];
     }
   }

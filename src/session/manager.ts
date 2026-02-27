@@ -39,7 +39,6 @@ export class SessionManager {
   }
 
   get(key: string): Session {
-    logger.debug("session", "get:", key);
     const cached = this.cache.get(key);
     if (cached) return cached;
 
@@ -49,12 +48,16 @@ export class SessionManager {
     if (existsSync(path)) {
       const lines = readFileSync(path, "utf-8").split("\n").filter(Boolean);
       for (const line of lines) {
-        const obj = JSON.parse(line);
-        if (obj._type === "metadata") {
-          session.lastConsolidated = obj.lastConsolidated ?? 0;
-          if (obj.createdAt) session.createdAt = obj.createdAt;
-        } else {
-          session.messages.push(obj as SessionEntry);
+        try {
+          const obj = JSON.parse(line);
+          if (obj._type === "metadata") {
+            session.lastConsolidated = obj.lastConsolidated ?? 0;
+            if (obj.createdAt) session.createdAt = obj.createdAt;
+          } else {
+            session.messages.push(obj as SessionEntry);
+          }
+        } catch (e) {
+          logger.error("session", `corrupt line in session file, key=${key}`, e);
         }
       }
     }
@@ -115,8 +118,6 @@ export class SessionManager {
   }
 
   messageCount(key: string): number {
-    const count = this.get(key).messages.length;
-    logger.debug("session", "messageCount:", key, count);
-    return count;
+    return this.get(key).messages.length;
   }
 }

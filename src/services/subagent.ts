@@ -32,6 +32,7 @@ export class SubagentManager {
 
     const task: SubagentTask = { id, session, originChannel, originChatId };
     this.tasks.set(id, task);
+    logger.info("subagent", `spawned ${id}`);
 
     this.runTask(task, taskPrompt).catch((err) => {
       logger.error("subagent", `${id} failed:`, err);
@@ -60,6 +61,7 @@ export class SubagentManager {
       };
       this.bus.publishInbound(msg);
     } finally {
+      logger.info("subagent", `completed ${task.id}`);
       task.session.close();
       this.tasks.delete(task.id);
     }

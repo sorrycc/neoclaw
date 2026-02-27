@@ -58,7 +58,7 @@ export function defaultConfig(baseDir: string): Config {
       telegram: { enabled: false, token: "", allowFrom: [] },
       cli: { enabled: true },
     },
-    logLevel: "info",
+    logLevel: "debug",
   };
 }
 

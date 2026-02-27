@@ -64,7 +64,7 @@ async function processMsg(bus: MessageBus, agent: NeovateAgent, msg: InboundMess
       bus.publishOutbound(response);
     }
   } catch (err) {
-    logger.error("main", "error processing message:", err);
+    logger.error("main", `error processing message, session=${sessionKey(msg)}:`, err);
     bus.publishOutbound({
       channel: msg.channel,
       chatId: msg.chatId,
@@ -145,7 +145,7 @@ async function main(): Promise<void> {
 
   if (config.logLevel) setLevel(config.logLevel);
 
-  logger.info("neoclaw", "starting...");
+  logger.info("neoclaw", `starting v${pkg.version}, profile=${baseDir}`);
   logger.info("neoclaw", `model: ${config.agent.model}`);
   logger.info("neoclaw", `workspace: ${config.agent.workspace}`);
 

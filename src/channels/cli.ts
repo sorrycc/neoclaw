@@ -2,6 +2,7 @@ import * as readline from "readline";
 import type { Channel } from "./channel.js";
 import type { MessageBus } from "../bus/message-bus.js";
 import type { OutboundMessage, InboundMessage } from "../bus/types.js";
+import { logger } from "../logger.js";
 
 export class CLIChannel implements Channel {
   readonly name = "cli";
@@ -13,7 +14,7 @@ export class CLIChannel implements Channel {
   async start(): Promise<void> {
     this.running = true;
     this.rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    console.log("[neoclaw] CLI channel ready. Type a message (Ctrl+C to quit).");
+    logger.info("cli", "channel ready");
 
     return new Promise<void>((resolve) => {
       this.rl!.on("line", (line) => {

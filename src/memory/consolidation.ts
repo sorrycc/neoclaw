@@ -1,4 +1,5 @@
 import type { ConversationEntry, ConsolidationResult, PromptFn } from "./types.js";
+import { logger } from "../logger.js";
 
 export class ConsolidationService {
   private promptFn: PromptFn;
@@ -90,7 +91,9 @@ export class ConsolidationService {
     const text = (result.content || "").trim();
     if (!text) return {};
 
-    return this.parseResponse(text);
+    const parsed = this.parseResponse(text);
+    logger.info("consolidation", `done, hasHistory=${!!parsed.historyEntry} hasMemory=${!!parsed.memoryUpdate} messages=${messages.length}`);
+    return parsed;
   }
 
   private parseResponse(raw: string): ConsolidationResult {
@@ -113,6 +116,8 @@ export class ConsolidationService {
     } catch {
       // fall through
     }
+
+    logger.warn("consolidation", "direct JSON parse failed, using fallback extraction");
 
     // Tier 2: extract first {...} block via brace matching
     const start = text.indexOf("{");

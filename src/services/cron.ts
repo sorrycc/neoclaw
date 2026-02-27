@@ -58,6 +58,7 @@ export class CronService {
   async start(): Promise<void> {
     this.running = true;
     for (const job of this.jobs) this.armJob(job);
+    logger.info("cron", `started, ${this.jobs.length} jobs armed`);
     return new Promise<void>((resolve) => {
       this.stopResolve = resolve;
     });
@@ -110,6 +111,7 @@ export class CronService {
   }
 
   private fireJob(job: CronJob): void {
+    logger.info("cron", `fired job=${job.id} type=${job.type} message=${job.payload.message.slice(0, 50)}`);
     const msg: InboundMessage = {
       channel: "system",
       senderId: "cron",
@@ -165,6 +167,7 @@ export class CronService {
     this.jobs.push(job);
     await this.saveJobs();
     if (this.running) this.armJob(job);
+    logger.info("cron", `added job=${job.id} type=${job.type} schedule=${job.schedule}`);
     return job;
   }
 
@@ -178,6 +181,7 @@ export class CronService {
     }
     this.jobs.splice(idx, 1);
     await this.saveJobs();
+    logger.info("cron", `removed job=${jobId}`);
     return true;
   }
 
@@ -192,6 +196,7 @@ export class CronService {
       this.timers.delete(jobId);
     }
     await this.saveJobs();
+    logger.info("cron", `paused job=${jobId}`);
     return true;
   }
 
@@ -201,6 +206,7 @@ export class CronService {
     job.enabled = true;
     if (this.running) this.armJob(job);
     await this.saveJobs();
+    logger.info("cron", `resumed job=${jobId}`);
     return true;
   }
 

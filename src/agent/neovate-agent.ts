@@ -219,7 +219,7 @@ export class NeovateAgent implements Agent {
         const status = m.isError ? "error" : "success";
         logger.debug("agent", `result: ${status} content=${JSON.stringify(finalContent).slice(0, 80)}`);
         if (m.usage) {
-          logger.debug("agent", `usage: in=${m.usage.input_tokens} out=${m.usage.output_tokens}`);
+          logger.info("agent", `usage: in=${m.usage.input_tokens} out=${m.usage.output_tokens}`);
         }
       }
     }
@@ -255,6 +255,7 @@ export class NeovateAgent implements Agent {
       if (result.memoryUpdate && result.memoryUpdate !== currentMemory) {
         this.memoryManager.writeMemory(result.memoryUpdate);
       }
+      logger.info("agent", `consolidation ok, historyEntry=${!!result.historyEntry} memoryUpdated=${result.memoryUpdate !== currentMemory}`);
     } catch (err) {
       logger.error("agent", "consolidation failed or timed out:", err);
       // Fallback: write raw summary so nothing is lost
