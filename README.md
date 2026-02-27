@@ -8,33 +8,66 @@ A multi-channel AI agent built with [Neovate Code](https://github.com/neovate-co
 
 ## Features
 
-- **Multi-channel**: CLI and Telegram support
-- **AI-powered**: Uses Neovate Code agents for message processing
-- **Cron jobs**: Scheduled tasks support
-- **Heartbeat monitoring**: Built-in health checks
+- **Multi-channel** — CLI, Telegram, and DingTalk
+- **AI-powered** — Neovate Code agent with configurable models and providers
+- **Memory** — persistent conversation memory with automatic consolidation
+- **Cron jobs** — scheduled tasks with cron expression support
+- **Profiles** — multiple isolated configurations via `--profile`
+- **Hot reload** — config changes apply without restart
+- **Heartbeat** — built-in health monitoring
+
+## Install
+
+```bash
+npm install -g neoclaw
+```
 
 ## Quick Start
 
 ```bash
-# Install dependencies
-bun install
+# Initialize workspace and config
+neoclaw onboard
 
-# Set environment variables
-export TELEGRAM_BOT_TOKEN="your-token"
-export OPENAI_API_KEY="your-key"
+# Edit config
+# ~/.neoclaw/config.json
 
-# Run
-bun start
+# Start the agent
+neoclaw
 ```
+
+## CLI Usage
+
+```
+neoclaw [command] [options]
+
+Commands:
+  (default)    Start the agent
+  onboard      Initialize workspace and configuration
+  status       Show agent status and cron jobs
+  cron         Manage scheduled tasks
+  help         Show help
+
+Options:
+  --profile <name>  Use a named profile (~/.neoclaw-<name>)
+  --dev             Use dev profile (~/.neoclaw-dev)
+  -v, --version     Print version
+  -h, --help        Show help
+```
+
+## Configuration
+
+Config lives at `~/.neoclaw/config.json` (or `~/.neoclaw-<profile>/config.json`).
 
 ## Development
 
-```bash
-# Watch mode
-bun dev
+Requires [Bun](https://bun.sh). Do not use npm to install dependencies.
 
-# Type check
-bun run typecheck
+```bash
+bun install          # Install dependencies
+bun dev              # Watch mode
+bun start            # Run from source
+bun run typecheck    # Type check
+bun run build        # Build for distribution
 ```
 
 ## License
