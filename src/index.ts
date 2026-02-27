@@ -151,6 +151,11 @@ async function main(): Promise<void> {
   const config = loadConfig(baseDir);
   ensureWorkspaceDirs(config.agent.workspace);
 
+  if (!config.agent.model) {
+    logger.error("neoclaw", "no model configured — set agent.model in config.json or NEOCLAW_MODEL env");
+    process.exit(1);
+  }
+
   if (config.logLevel) setLevel(config.logLevel);
 
   logger.info("neoclaw", `starting v${pkg.version}, profile=${baseDir}`);

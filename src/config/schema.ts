@@ -32,8 +32,6 @@ export interface ChannelsConfig {
 export interface AgentConfig {
   model: string;
   codeModel?: string;
-  temperature: number;
-  maxTokens: number;
   memoryWindow: number;
   workspace: string;
   maxMemorySize?: number;
@@ -50,12 +48,10 @@ export interface Config {
 export function defaultConfig(baseDir: string): Config {
   return {
     agent: {
-      model: "anthropic/claude-sonnet-4-20250514",
-      temperature: 0.7,
-      maxTokens: 4096,
+      model: "",
       memoryWindow: 50,
       workspace: join(baseDir, "workspace"),
-      maxMemorySize: 8192,
+      maxMemorySize: 40960,
       consolidationTimeout: 30000,
     },
     channels: {
