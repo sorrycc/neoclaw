@@ -19,6 +19,7 @@ export interface Session {
   key: string;
   messages: SessionEntry[];
   lastConsolidated: number;
+  createdAt: string;
 }
 
 export class SessionManager {
@@ -42,7 +43,7 @@ export class SessionManager {
     if (cached) return cached;
 
     const path = this.filePath(key);
-    const session: Session = { key, messages: [], lastConsolidated: 0 };
+    const session: Session = { key, messages: [], lastConsolidated: 0, createdAt: new Date().toISOString() };
 
     if (existsSync(path)) {
       const lines = readFileSync(path, "utf-8").split("\n").filter(Boolean);
@@ -50,6 +51,7 @@ export class SessionManager {
         const obj = JSON.parse(line);
         if (obj._type === "metadata") {
           session.lastConsolidated = obj.lastConsolidated ?? 0;
+          if (obj.createdAt) session.createdAt = obj.createdAt;
         } else {
           session.messages.push(obj as SessionEntry);
         }
@@ -79,7 +81,7 @@ export class SessionManager {
     const path = this.filePath(key);
     const meta: SessionMeta = { _type: "metadata", key, createdAt: new Date().toISOString(), lastConsolidated: 0 };
     writeFileSync(path, JSON.stringify(meta) + "\n", "utf-8");
-    this.cache.set(key, { key, messages: [], lastConsolidated: 0 });
+    this.cache.set(key, { key, messages: [], lastConsolidated: 0, createdAt: meta.createdAt });
   }
 
   updateConsolidated(key: string, index: number): void {
@@ -101,7 +103,7 @@ export class SessionManager {
     const session = this.get(key);
     const path = this.filePath(key);
     const meta: SessionMeta = {
-      _type: "metadata", key, createdAt: new Date().toISOString(),
+      _type: "metadata", key, createdAt: session.createdAt,
       lastConsolidated: session.lastConsolidated,
     };
     const lines = [JSON.stringify(meta)];

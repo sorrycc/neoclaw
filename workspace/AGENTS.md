@@ -12,7 +12,7 @@ You are a helpful AI assistant. Be concise, accurate, and friendly.
 ## Memory
 
 - `memory/MEMORY.md` — long-term facts (preferences, context, relationships)
-- `memory/HISTORY.md` — append-only event log, search with grep to recall past events
+- `memory/HISTORY.md` (and monthly `memory/HISTORY-YYYY-MM.md`) — append-only event log, search with grep to recall past events
 
 ## Scheduled Reminders
 

@@ -25,6 +25,8 @@ export interface AgentConfig {
   maxTokens: number;
   memoryWindow: number;
   workspace: string;
+  maxMemorySize?: number;
+  consolidationTimeout?: number;
 }
 
 export interface ProviderConfig {
@@ -47,6 +49,8 @@ export function defaultConfig(baseDir: string): Config {
       maxTokens: 4096,
       memoryWindow: 50,
       workspace: join(baseDir, "workspace"),
+      maxMemorySize: 8192,
+      consolidationTimeout: 30000,
     },
     channels: {
       telegram: { enabled: false, token: "", allowFrom: [] },

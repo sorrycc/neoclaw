@@ -1,13 +1,15 @@
 import { join } from "path";
 import { readdirSync, existsSync, statSync, readFileSync } from "fs";
 import { extname } from "path";
-import { createSession, type SDKSession } from "@neovate/code";
+import { createSession, prompt, type SDKSession } from "@neovate/code";
 import type { Agent } from "./agent.js";
 import type { InboundMessage, OutboundMessage } from "../bus/types.js";
 import { sessionKey } from "../bus/types.js";
 import { ContextBuilder } from "./context.js";
 import { SessionManager } from "../session/manager.js";
 import { MemoryManager } from "../memory/memory.js";
+import { ConsolidationService } from "../memory/consolidation.js";
+import type { ConversationEntry } from "../memory/types.js";
 import type { Config } from "../config/schema.js";
 import type { CronService } from "../services/cron.js";
 import { createCronTool } from "./tools/cron.js";
@@ -20,11 +22,17 @@ export class NeovateAgent implements Agent {
   private contextBuilder: ContextBuilder;
   private sessionManager: SessionManager;
   private memoryManager: MemoryManager;
+  private consolidationService: ConsolidationService;
 
   constructor(private config: Config, private cronService: CronService) {
     this.memoryManager = new MemoryManager(config.agent.workspace);
     this.contextBuilder = new ContextBuilder(config.agent.workspace, this.memoryManager);
     this.sessionManager = new SessionManager(config.agent.workspace);
+    this.consolidationService = new ConsolidationService(
+      (message, options) => prompt(message, options),
+      config.agent.model,
+      config.agent.maxMemorySize ?? 8192,
+    );
   }
 
   async *processMessage(msg: InboundMessage): AsyncGenerator<OutboundMessage> {
@@ -38,8 +46,7 @@ export class NeovateAgent implements Agent {
     if (msg.content === "/new") {
       const session = this.sessionManager.get(key);
       if (session.messages.length > 0) {
-        // Fire-and-forget: don't block session reset on slow memory consolidation
-        this.memoryManager.consolidate(session.messages, this.config.agent.model).catch(console.error);
+        await this.consolidateWithTimeout(session.messages);
       }
       await this.resetSession(key);
       yield reply("Session cleared.");
@@ -67,15 +74,26 @@ export class NeovateAgent implements Agent {
       return;
     }
 
+    let sessionRecap: string | undefined;
     const keepCount = Math.floor(this.config.agent.memoryWindow / 2);
     if (this.sessionManager.messageCount(key) > this.config.agent.memoryWindow) {
       const session = this.sessionManager.get(key);
       const cutoff = session.messages.length - keepCount;
       const oldMessages = session.messages.slice(session.lastConsolidated, cutoff);
       if (oldMessages.length > 0) {
-        await this.memoryManager.consolidate(oldMessages, this.config.agent.model);
+        await this.consolidateWithTimeout(oldMessages);
       }
       this.sessionManager.trimBefore(key, cutoff);
+
+      // Build recap from remaining messages for conversational continuity
+      const remaining = this.sessionManager.get(key).messages;
+      if (remaining.length > 0) {
+        sessionRecap = remaining
+          .filter((m) => m.content)
+          .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
+          .join("\n");
+      }
+
       const existing = this.sessions.get(key);
       if (existing) {
         existing.close();
@@ -94,6 +112,9 @@ export class NeovateAgent implements Agent {
       const cronTool = createCronTool({ cronService: this.cronService, channel: msg.channel, chatId: msg.chatId });
       const sendFileTool = createSendFileTool({ pendingMedia, workspace: this.config.agent.workspace });
       const codeTool = createCodeTool({ config: this.config });
+      const recapSection = sessionRecap
+        ? `\n\n## Recent Conversation Recap\nThe session was trimmed for context management. Here is a recap of recent messages:\n${sessionRecap}`
+        : "";
       sdkSession = await createSession({
         model: this.config.agent.model,
         cwd: this.config.agent.workspace,
@@ -111,7 +132,7 @@ export class NeovateAgent implements Agent {
               };
             },
             systemPrompt(original) {
-              return `${original}\n\n${systemContext}`;
+              return `${original}\n\n${systemContext}${recapSection}`;
             },
             tool() {
               return [cronTool, sendFileTool, codeTool];
@@ -215,6 +236,36 @@ export class NeovateAgent implements Agent {
     }
   }
 
+  private async consolidateWithTimeout(messages: ConversationEntry[]): Promise<void> {
+    const timeout = this.config.agent.consolidationTimeout ?? 30000;
+    const currentMemory = this.memoryManager.readMemory();
+
+    try {
+      const result = await Promise.race([
+        this.consolidationService.consolidate(messages, currentMemory),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("consolidation timeout")), timeout)
+        ),
+      ]);
+
+      if (result.historyEntry) {
+        this.memoryManager.appendHistoryRotated(result.historyEntry);
+      }
+      if (result.memoryUpdate && result.memoryUpdate !== currentMemory) {
+        this.memoryManager.writeMemory(result.memoryUpdate);
+      }
+    } catch (err) {
+      console.error("[agent] consolidation failed or timed out:", err);
+      // Fallback: write raw summary so nothing is lost
+      const summary = messages
+        .filter((m) => m.content)
+        .slice(-10)
+        .map((m) => `${m.role}: ${m.content.slice(0, 200)}`)
+        .join("\n");
+      this.memoryManager.appendHistoryRotated(`[raw-fallback] Consolidation failed. Recent messages:\n${summary}`);
+    }
+  }
+
   private getSkillNames(): string[] {
     const skillsDir = join(this.config.agent.workspace, "skills");
     if (!existsSync(skillsDir)) return [];
@@ -234,23 +285,25 @@ export class NeovateAgent implements Agent {
     if (!existsSync(skillFile)) return null;
     const raw = readFileSync(skillFile, "utf-8");
     const body = raw.replace(/^---[\s\S]*?---\n*/, "").trim();
-    let prompt = `Base directory for this skill: ${skillDir}\n\n${body}`;
-    const hasPositional = /\$[1-9]\d*/.test(prompt);
+    let p = `Base directory for this skill: ${skillDir}\n\n${body}`;
+    const hasPositional = /\$[1-9]\d*/.test(p);
     if (hasPositional) {
       const parsed = args.split(" ");
       for (let i = 0; i < parsed.length; i++) {
-        prompt = prompt.replace(new RegExp(`\\$${i + 1}\\b`, "g"), parsed[i] || "");
+        p = p.replace(new RegExp(`\\$${i + 1}\\b`, "g"), parsed[i] || "");
       }
-    } else if (prompt.includes("$ARGUMENTS")) {
-      prompt = prompt.replace(/\$ARGUMENTS/g, args || "");
+    } else if (p.includes("$ARGUMENTS")) {
+      p = p.replace(/\$ARGUMENTS/g, args || "");
     } else if (args) {
-      prompt += `\n\nArguments: ${args}`;
+      p += `\n\nArguments: ${args}`;
     }
-    return prompt;
+    return p;
   }
 
   updateConfig(config: Config): void {
     this.config = config;
+    this.consolidationService.updateModel(config.agent.model);
+    this.consolidationService.updateMaxMemorySize(config.agent.maxMemorySize ?? 8192);
     for (const [key, session] of this.sessions) {
       session.close();
       this.sessions.delete(key);
