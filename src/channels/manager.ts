@@ -19,9 +19,8 @@ export class ChannelManager {
   }
 
   updateConfig(config: Config): void {
-    const telegram = this.channels.get("telegram");
-    if (telegram && telegram instanceof TelegramChannel) {
-      telegram.updateConfig(config.channels.telegram);
+    for (const channel of this.channels.values()) {
+      channel.updateConfig?.(config.channels[channel.name as keyof typeof config.channels]);
     }
   }
 
@@ -34,12 +33,14 @@ export class ChannelManager {
 
   async stop(): Promise<void> {
     this.running = false;
+    this.bus.close();
     for (const c of this.channels.values()) await c.stop();
   }
 
   private async dispatchLoop(): Promise<void> {
     while (this.running) {
       const msg = await this.bus.consumeOutbound();
+      if (!msg) break;
       if (msg.channel === "system") continue;
       const channel = this.channels.get(msg.channel);
       if (channel) {

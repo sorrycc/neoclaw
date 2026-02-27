@@ -80,6 +80,7 @@ async function mainLoop(bus: MessageBus, agent: NeovateAgent): Promise<void> {
 
   while (true) {
     const msg = await bus.consumeInbound();
+    if (!msg) break;
     const key = sessionKey(msg);
 
     if (INTERRUPT_COMMANDS.has(msg.content)) {

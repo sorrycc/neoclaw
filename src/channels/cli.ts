@@ -46,6 +46,6 @@ export class CLIChannel implements Channel {
   }
 
   async send(msg: OutboundMessage): Promise<void> {
-    console.log(`\n${msg.content}\n`);
+    process.stdout.write(`\n${msg.content}\n`);
   }
 }

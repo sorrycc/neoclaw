@@ -1,5 +1,7 @@
+export type ChannelName = "cli" | "telegram" | "system";
+
 export interface InboundMessage {
-  channel: string;
+  channel: ChannelName;
   senderId: string;
   chatId: string;
   content: string;
@@ -9,7 +11,7 @@ export interface InboundMessage {
 }
 
 export interface OutboundMessage {
-  channel: string;
+  channel: ChannelName;
   chatId: string;
   content: string;
   replyTo?: string;

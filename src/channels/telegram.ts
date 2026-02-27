@@ -76,7 +76,7 @@ export class TelegramChannel implements Channel {
   private bot: Bot;
   private running = false;
   private typingIntervals = new Map<string, ReturnType<typeof setInterval>>();
-  private lastSentContent = new Map<string, string>();
+  private lastSentContent = new Map<string, { content: string; time: number }>();
   private botUsername = "";
   private skillsWatcher: FSWatcher | null = null;
   private skillsDebounce: ReturnType<typeof setTimeout> | null = null;
@@ -105,6 +105,17 @@ export class TelegramChannel implements Channel {
     return ctx.message?.reply_to_message?.from?.id === this.bot.botInfo.id;
   }
 
+  private senderIdFrom(ctx: { from?: { id: number; username?: string } }): string {
+    return `${ctx.from?.id}|${ctx.from?.username ?? ""}`;
+  }
+
+  private guardInbound(ctx: { chat: { id: number; type: string }; from?: { id: number; username?: string } }):
+    { allowed: false } | { allowed: true; senderId: string; chatId: string } {
+    const senderId = this.senderIdFrom(ctx);
+    if (!this.isAllowed(senderId)) return { allowed: false };
+    return { allowed: true, senderId, chatId: ctx.chat.id.toString() };
+  }
+
   async start(): Promise<void> {
     this.running = true;
 
@@ -115,21 +126,21 @@ export class TelegramChannel implements Channel {
     this.bot.command("start", (ctx) => ctx.reply("neoclaw ready."));
 
     this.bot.command("new", (ctx) => {
-      const senderId = `${ctx.from?.id}|${ctx.from?.username ?? ""}`;
-      if (!this.isAllowed(senderId)) return;
-      this.publishInbound(ctx.chat.id.toString(), senderId, "/new", []);
+      const guard = this.guardInbound(ctx);
+      if (!guard.allowed) return;
+      this.publishInbound(guard.chatId, guard.senderId, "/new", []);
     });
 
     this.bot.command("help", (ctx) => {
-      const senderId = `${ctx.from?.id}|${ctx.from?.username ?? ""}`;
-      if (!this.isAllowed(senderId)) return;
-      this.publishInbound(ctx.chat.id.toString(), senderId, "/help", []);
+      const guard = this.guardInbound(ctx);
+      if (!guard.allowed) return;
+      this.publishInbound(guard.chatId, guard.senderId, "/help", []);
     });
 
     this.bot.command("stop", (ctx) => {
-      const senderId = `${ctx.from?.id}|${ctx.from?.username ?? ""}`;
-      if (!this.isAllowed(senderId)) return;
-      this.publishInbound(ctx.chat.id.toString(), senderId, "/stop", []);
+      const guard = this.guardInbound(ctx);
+      if (!guard.allowed) return;
+      this.publishInbound(guard.chatId, guard.senderId, "/stop", []);
     });
 
     this.registerDynamicSkillHandler();
@@ -137,9 +148,10 @@ export class TelegramChannel implements Channel {
     this.watchSkillsDir();
 
     this.bot.on("message:text", (ctx) => {
-      const senderId = `${ctx.from?.id}|${ctx.from?.username ?? ""}`;
+      const guard = this.guardInbound(ctx);
+      const senderId = this.senderIdFrom(ctx);
       logger.debug("telegram", "message:text", { text: ctx.message.text.slice(0, 100), chatType: ctx.chat.type, senderId, chatId: ctx.chat.id });
-      if (!this.isAllowed(senderId)) {
+      if (!guard.allowed) {
         logger.debug("telegram", "blocked by allowFrom, senderId:", senderId);
         return;
       }
@@ -151,67 +163,64 @@ export class TelegramChannel implements Channel {
         if (!mentioned && !isReply) return;
         const content = mentioned ? cleaned : ctx.message.text;
         if (!content) return;
-        this.startTyping(ctx.chat.id.toString());
-        this.publishInbound(ctx.chat.id.toString(), senderId, content, []);
+        this.startTyping(guard.chatId);
+        this.publishInbound(guard.chatId, guard.senderId, content, []);
         return;
       }
 
-      this.startTyping(ctx.chat.id.toString());
-      this.publishInbound(ctx.chat.id.toString(), senderId, ctx.message.text, []);
+      this.startTyping(guard.chatId);
+      this.publishInbound(guard.chatId, guard.senderId, ctx.message.text, []);
     });
 
     this.bot.on("message:photo", async (ctx) => {
-      const senderId = `${ctx.from?.id}|${ctx.from?.username ?? ""}`;
+      const guard = this.guardInbound(ctx);
+      const senderId = this.senderIdFrom(ctx);
       logger.debug("telegram", "message:photo", { chatType: ctx.chat.type, senderId, chatId: ctx.chat.id });
-      if (!this.isAllowed(senderId)) {
+      if (!guard.allowed) {
         logger.debug("telegram", "blocked by allowFrom, senderId:", senderId);
         return;
       }
       const caption = ctx.message.caption ?? "";
-
       const media = await this.downloadFile(ctx.message.photo[ctx.message.photo.length - 1].file_id, "jpg");
-
-      if (this.isGroupChat(ctx.chat.type)) {
-        const { mentioned, cleaned } = this.extractMention(caption);
-        const isReply = this.isReplyToBot(ctx);
-        logger.debug("telegram", "group photo check", { mentioned, cleaned, isReply });
-        if (!mentioned && !isReply) return;
-        this.startTyping(ctx.chat.id.toString());
-        this.publishInbound(ctx.chat.id.toString(), senderId, mentioned ? cleaned : caption, media);
-        return;
-      }
-
-      this.startTyping(ctx.chat.id.toString());
-      this.publishInbound(ctx.chat.id.toString(), senderId, caption, media);
+      this.handleInboundMedia(ctx, guard.senderId, caption, media);
     });
 
     this.bot.on("message:document", async (ctx) => {
-      const senderId = `${ctx.from?.id}|${ctx.from?.username ?? ""}`;
-      logger.debug("telegram", "message:document", { chatType: ctx.chat.type, senderId, chatId: ctx.chat.id });
-      if (!this.isAllowed(senderId)) return;
+      const guard = this.guardInbound(ctx);
+      logger.debug("telegram", "message:document", { chatType: ctx.chat.type, senderId: this.senderIdFrom(ctx), chatId: ctx.chat.id });
+      if (!guard.allowed) return;
       const caption = ctx.message.caption ?? "";
       const doc = ctx.message.document;
       const media = await this.downloadFile(doc.file_id, "bin", doc.file_name ?? undefined);
-      this.handleInboundMedia(ctx, senderId, caption, media);
+      this.handleInboundMedia(ctx, guard.senderId, caption, media);
     });
 
     this.bot.on("message:video", async (ctx) => {
-      const senderId = `${ctx.from?.id}|${ctx.from?.username ?? ""}`;
-      logger.debug("telegram", "message:video", { chatType: ctx.chat.type, senderId, chatId: ctx.chat.id });
-      if (!this.isAllowed(senderId)) return;
+      const guard = this.guardInbound(ctx);
+      logger.debug("telegram", "message:video", { chatType: ctx.chat.type, senderId: this.senderIdFrom(ctx), chatId: ctx.chat.id });
+      if (!guard.allowed) return;
       const caption = ctx.message.caption ?? "";
       const media = await this.downloadFile(ctx.message.video.file_id, "mp4");
-      this.handleInboundMedia(ctx, senderId, caption, media);
+      this.handleInboundMedia(ctx, guard.senderId, caption, media);
     });
 
     this.bot.on("message:audio", async (ctx) => {
-      const senderId = `${ctx.from?.id}|${ctx.from?.username ?? ""}`;
-      logger.debug("telegram", "message:audio", { chatType: ctx.chat.type, senderId, chatId: ctx.chat.id });
-      if (!this.isAllowed(senderId)) return;
+      const guard = this.guardInbound(ctx);
+      logger.debug("telegram", "message:audio", { chatType: ctx.chat.type, senderId: this.senderIdFrom(ctx), chatId: ctx.chat.id });
+      if (!guard.allowed) return;
       const caption = ctx.message.caption ?? "";
       const audio = ctx.message.audio;
       const media = await this.downloadFile(audio.file_id, "mp3", audio.file_name ?? undefined);
-      this.handleInboundMedia(ctx, senderId, caption, media);
+      this.handleInboundMedia(ctx, guard.senderId, caption, media);
+    });
+
+    this.bot.on("message:voice", async (ctx) => {
+      const guard = this.guardInbound(ctx);
+      logger.debug("telegram", "message:voice", { chatType: ctx.chat.type, senderId: this.senderIdFrom(ctx), chatId: ctx.chat.id });
+      if (!guard.allowed) return;
+      const caption = ctx.message.caption ?? "";
+      const media = await this.downloadFile(ctx.message.voice.file_id, "ogg");
+      this.handleInboundMedia(ctx, guard.senderId, caption, media);
     });
 
     await this.bot.start({ drop_pending_updates: true });
@@ -235,8 +244,9 @@ export class TelegramChannel implements Channel {
     }
 
     const dedup = msg.content + msg.media.join(",");
-    if (this.lastSentContent.get(chatId) === dedup) return;
-    this.lastSentContent.set(chatId, dedup);
+    const last = this.lastSentContent.get(chatId);
+    if (last && last.content === dedup && Date.now() - last.time <= 5000) return;
+    this.lastSentContent.set(chatId, { content: dedup, time: Date.now() });
 
     if (msg.media.length > 0) {
       await this.sendWithMedia(numericChatId, msg);
@@ -367,7 +377,7 @@ export class TelegramChannel implements Channel {
       const skills = this.getValidSkills();
       const match = skills.find((s) => s.command === raw);
       if (!match) return next();
-      const senderId = `${ctx.from?.id}|${ctx.from?.username ?? ""}`;
+      const senderId = this.senderIdFrom(ctx);
       if (!this.isAllowed(senderId)) return;
       const args = parts.slice(1).join(" ");
       this.startTyping(ctx.chat.id.toString());

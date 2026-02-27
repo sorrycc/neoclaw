@@ -9,7 +9,7 @@ export class MessageBus {
     this.inbound.push(msg);
   }
 
-  async consumeInbound(): Promise<InboundMessage> {
+  async consumeInbound(): Promise<InboundMessage | undefined> {
     return this.inbound.pop();
   }
 
@@ -17,7 +17,12 @@ export class MessageBus {
     this.outbound.push(msg);
   }
 
-  async consumeOutbound(): Promise<OutboundMessage> {
+  async consumeOutbound(): Promise<OutboundMessage | undefined> {
     return this.outbound.pop();
+  }
+
+  close(): void {
+    this.inbound.close();
+    this.outbound.close();
   }
 }
