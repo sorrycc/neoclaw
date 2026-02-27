@@ -1,6 +1,6 @@
 {
   "name": "neoclaw",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "type": "module",
   "bin": {
     "neoclaw": "dist/index.js"
