@@ -112,6 +112,7 @@ async function main(): Promise<void> {
     ensureWorkspaceDirs(config.agent.workspace);
     const bus = new MessageBus();
     const cron = new CronService(config.agent.workspace, bus);
+    await cron.init();
     console.log(handleStatusCommand(config, cron, baseDir));
     process.exit(0);
   }
@@ -126,8 +127,9 @@ async function main(): Promise<void> {
     ensureWorkspaceDirs(config.agent.workspace);
     const bus = new MessageBus();
     const cron = new CronService(config.agent.workspace, bus);
+    await cron.init();
     const args = argv._.slice(1).map(String);
-    console.log(handleCronCommand(cron, args));
+    console.log(await handleCronCommand(cron, args));
     process.exit(0);
   }
 
@@ -146,6 +148,7 @@ async function main(): Promise<void> {
 
   const bus = new MessageBus();
   const cron = new CronService(config.agent.workspace, bus);
+  await cron.init();
   const agent = new NeovateAgent(config, cron);
   const channelManager = new ChannelManager(config, bus);
   const heartbeat = new HeartbeatService(config.agent.workspace, bus);

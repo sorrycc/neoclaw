@@ -36,6 +36,12 @@ cron(action="list")
 cron(action="remove", job_id="abc123")
 ```
 
+Pause/resume:
+```
+cron(action="pause", job_id="abc123")
+cron(action="resume", job_id="abc123")
+```
+
 ## Time Expressions
 
 | User says | Parameters |
