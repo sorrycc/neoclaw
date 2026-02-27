@@ -1,5 +1,5 @@
 import { join, resolve } from "path";
-import { existsSync, readFileSync, readdirSync } from "fs";
+import { readFile, access } from "fs/promises";
 import { arch, type as osType } from "os";
 import type { MemoryManager } from "../memory/memory.js";
 
@@ -14,27 +14,15 @@ export class ContextBuilder {
     this.memory = memory;
   }
 
-  getSkillPaths(): string[] {
-    const paths: string[] = [];
-    const skillsDir = join(this.workspace, "skills");
-    if (existsSync(skillsDir)) {
-      for (const name of readdirSync(skillsDir)) {
-        const skillFile = join(skillsDir, name, "SKILL.md");
-        if (existsSync(skillFile)) paths.push(skillFile);
-      }
-    }
-    return paths;
-  }
-
-  getSystemContext(channel?: string, chatId?: string): string {
+  async getSystemContext(channel?: string, chatId?: string): Promise<string> {
     const parts: string[] = [];
 
     parts.push(this.getIdentity());
 
-    const bootstrap = this.loadBootstrapFiles();
+    const bootstrap = await this.loadBootstrapFiles();
     if (bootstrap) parts.push(bootstrap);
 
-    const mem = this.memory.readMemory();
+    const mem = await this.memory.readMemory();
     if (mem) parts.push(`# Memory\n\n${mem}`);
 
     if (channel && chatId) {
@@ -86,13 +74,16 @@ When remembering something important, write to ${ws}/memory/MEMORY.md
 To recall past events, grep ${ws}/memory/HISTORY.md`;
   }
 
-  private loadBootstrapFiles(): string {
+  private async loadBootstrapFiles(): Promise<string> {
     const parts: string[] = [];
     for (const filename of BOOTSTRAP_FILES) {
       const filePath = join(this.workspace, filename);
-      if (existsSync(filePath)) {
-        const content = readFileSync(filePath, "utf-8").trim();
+      try {
+        await access(filePath);
+        const content = (await readFile(filePath, "utf-8")).trim();
         if (content) parts.push(`## ${filename}\n\n${content}`);
+      } catch {
+        // file doesn't exist, skip
       }
     }
     return parts.join("\n\n");

@@ -1,8 +1,9 @@
 import { createTool, _zod as z } from "@neovate/code";
 import { existsSync } from "fs";
+import type { MediaQueue } from "../media-queue.js";
 
-export function createSendFileTool(opts: { pendingMedia: string[]; workspace: string }): ReturnType<typeof createTool> {
-  const { pendingMedia, workspace } = opts;
+export function createSendFileTool(opts: { mediaQueue: MediaQueue; workspace: string }): ReturnType<typeof createTool> {
+  const { mediaQueue, workspace } = opts;
 
   return createTool({
     name: "send_file",
@@ -20,7 +21,7 @@ export function createSendFileTool(opts: { pendingMedia: string[]; workspace: st
         }
       }
 
-      pendingMedia.push(path);
+      mediaQueue.push(path);
       return { llmContent: `File queued for sending: ${path}` };
     },
   });

@@ -1,14 +1,19 @@
 import { join } from "path";
-import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } from "fs";
+import { readFile, writeFile, appendFile, mkdir, access } from "fs/promises";
 import { logger } from "../logger.js";
 
 export class MemoryManager {
   private memoryDir: string;
 
-  constructor(workspace: string) {
+  private constructor(workspace: string) {
     this.memoryDir = join(workspace, "memory");
-    logger.debug("memory", "constructor: memoryDir =", this.memoryDir);
-    mkdirSync(this.memoryDir, { recursive: true });
+  }
+
+  static async create(workspace: string): Promise<MemoryManager> {
+    const mgr = new MemoryManager(workspace);
+    logger.debug("memory", "create: memoryDir =", mgr.memoryDir);
+    await mkdir(mgr.memoryDir, { recursive: true });
+    return mgr;
   }
 
   private get memoryPath(): string {
@@ -19,30 +24,34 @@ export class MemoryManager {
     return join(this.memoryDir, "HISTORY.md");
   }
 
-  readMemory(): string {
-    if (!existsSync(this.memoryPath)) return "";
-    return readFileSync(this.memoryPath, "utf-8").trim();
+  async readMemory(): Promise<string> {
+    try {
+      await access(this.memoryPath);
+      return (await readFile(this.memoryPath, "utf-8")).trim();
+    } catch {
+      return "";
+    }
   }
 
-  writeMemory(content: string): void {
-    writeFileSync(this.memoryPath, content, "utf-8");
+  async writeMemory(content: string): Promise<void> {
+    await writeFile(this.memoryPath, content, "utf-8");
   }
 
-  appendHistory(entry: string): void {
+  async appendHistory(entry: string): Promise<void> {
     const line = `\n## ${new Date().toISOString()}\n${entry}\n`;
-    appendFileSync(this.historyPath, line, "utf-8");
+    await appendFile(this.historyPath, line, "utf-8");
   }
 
-  appendHistoryRotated(entry: string): void {
+  async appendHistoryRotated(entry: string): Promise<void> {
     const now = new Date();
     const line = `\n## ${now.toISOString()}\n${entry}\n`;
 
     // Write to main HISTORY.md (backward compat)
-    appendFileSync(this.historyPath, line, "utf-8");
+    await appendFile(this.historyPath, line, "utf-8");
 
     // Write to monthly rotated file
     const month = now.toISOString().slice(0, 7); // YYYY-MM
     const rotatedPath = join(this.memoryDir, `HISTORY-${month}.md`);
-    appendFileSync(rotatedPath, line, "utf-8");
+    await appendFile(rotatedPath, line, "utf-8");
   }
 }
