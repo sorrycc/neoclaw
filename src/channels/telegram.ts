@@ -1,5 +1,4 @@
 import { Bot, InputFile } from "grammy";
-import type { InputMediaPhoto, InputMediaDocument, InputMediaVideo, InputMediaAudio } from "grammy/types";
 import { join } from "path";
 import { readdirSync, existsSync, statSync, mkdirSync, writeFileSync, watch, type FSWatcher } from "fs";
 import { tmpdir } from "os";

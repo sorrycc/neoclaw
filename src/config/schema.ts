@@ -1,6 +1,6 @@
 import { join } from "path";
-import { homedir } from "os";
 import { existsSync, readFileSync, mkdirSync, writeFileSync, watch, type FSWatcher } from "fs";
+import type { ProviderConfig } from "@neovate/code";
 import { logger } from "../logger.js";
 
 export interface TelegramConfig {
@@ -38,12 +38,6 @@ export interface AgentConfig {
   workspace: string;
   maxMemorySize?: number;
   consolidationTimeout?: number;
-}
-
-export interface ProviderConfig {
-  api: string;
-  options?: Record<string, unknown>;
-  models?: Record<string, string>;
 }
 
 export interface Config {
