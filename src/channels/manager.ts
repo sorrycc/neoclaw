@@ -4,6 +4,7 @@ import type { Config } from "../config/schema.js";
 import { logger } from "../logger.js";
 import { TelegramChannel } from "./telegram.js";
 import { CLIChannel } from "./cli.js";
+import { DingtalkChannel } from "./dingtalk.js";
 
 export class ChannelManager {
   private channels = new Map<string, Channel>();
@@ -15,6 +16,9 @@ export class ChannelManager {
     }
     if (config.channels.telegram.enabled) {
       this.channels.set("telegram", new TelegramChannel(config.channels.telegram, bus, config.agent.workspace));
+    }
+    if (config.channels.dingtalk.enabled) {
+      this.channels.set("dingtalk", new DingtalkChannel(config.channels.dingtalk, bus));
     }
   }
 

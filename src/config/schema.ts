@@ -14,9 +14,19 @@ export interface CliConfig {
   enabled: boolean;
 }
 
+export interface DingtalkConfig {
+  enabled: boolean;
+  clientId: string;
+  clientSecret: string;
+  robotCode: string;
+  corpId?: string;
+  allowFrom: string[];
+}
+
 export interface ChannelsConfig {
   telegram: TelegramConfig;
   cli: CliConfig;
+  dingtalk: DingtalkConfig;
 }
 
 export interface AgentConfig {
@@ -57,6 +67,7 @@ export function defaultConfig(baseDir: string): Config {
     channels: {
       telegram: { enabled: false, token: "", allowFrom: [] },
       cli: { enabled: true },
+      dingtalk: { enabled: false, clientId: "", clientSecret: "", robotCode: "", allowFrom: [] },
     },
     logLevel: "debug",
   };
@@ -75,6 +86,20 @@ function envOverride(config: Config): Config {
 
   const af = process.env.NEOCLAW_TELEGRAM_ALLOW_FROM;
   if (af) config.channels.telegram.allowFrom = af.split(",").map((s) => s.trim());
+
+  if (process.env.NEOCLAW_DINGTALK_ENABLED === "true") {
+    config.channels.dingtalk.enabled = true;
+  }
+  const dci = process.env.NEOCLAW_DINGTALK_CLIENT_ID;
+  if (dci) config.channels.dingtalk.clientId = dci;
+  const dcs = process.env.NEOCLAW_DINGTALK_CLIENT_SECRET;
+  if (dcs) config.channels.dingtalk.clientSecret = dcs;
+  const drc = process.env.NEOCLAW_DINGTALK_ROBOT_CODE;
+  if (drc) config.channels.dingtalk.robotCode = drc;
+  const dcorp = process.env.NEOCLAW_DINGTALK_CORP_ID;
+  if (dcorp) config.channels.dingtalk.corpId = dcorp;
+  const daf = process.env.NEOCLAW_DINGTALK_ALLOW_FROM;
+  if (daf) config.channels.dingtalk.allowFrom = daf.split(",").map((s) => s.trim());
 
   return config;
 }
@@ -95,6 +120,7 @@ export function loadConfig(baseDir: string): Config {
     config.channels = {
       telegram: { ...defaults.channels.telegram, ...raw.channels?.telegram },
       cli: { ...defaults.channels.cli, ...raw.channels?.cli },
+      dingtalk: { ...defaults.channels.dingtalk, ...raw.channels?.dingtalk },
     };
   } else {
     config = structuredClone(defaults);

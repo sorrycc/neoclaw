@@ -1,4 +1,4 @@
-export type ChannelName = "cli" | "telegram" | "system";
+export type ChannelName = "cli" | "telegram" | "dingtalk" | "system";
 
 export interface InboundMessage {
   channel: ChannelName;
