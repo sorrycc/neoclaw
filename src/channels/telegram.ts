@@ -44,6 +44,28 @@ function escapeHtml(s: string): string {
 }
 
 const CAPTION_LIMIT = 1024;
+const TG_MSG_LIMIT = 4096;
+
+function splitText(text: string, limit: number): string[] {
+  if (text.length <= limit) return [text];
+  const chunks: string[] = [];
+  let remaining = text;
+  while (remaining.length > 0) {
+    if (remaining.length <= limit) {
+      chunks.push(remaining);
+      break;
+    }
+    const slice = remaining.slice(0, limit);
+    // prefer splitting at double-newline, then single-newline, then last space
+    let splitAt = slice.lastIndexOf("\n\n");
+    if (splitAt < limit * 0.3) splitAt = slice.lastIndexOf("\n");
+    if (splitAt < limit * 0.3) splitAt = slice.lastIndexOf(" ");
+    if (splitAt < limit * 0.3) splitAt = limit; // hard cut as last resort
+    chunks.push(remaining.slice(0, splitAt).trimEnd());
+    remaining = remaining.slice(splitAt).trimStart();
+  }
+  return chunks;
+}
 
 function isUrl(s: string): boolean {
   return s.startsWith("http://") || s.startsWith("https://");
@@ -256,14 +278,18 @@ export class TelegramChannel implements Channel {
 
   private async sendText(chatId: number, content: string): Promise<void> {
     const html = mdToTelegramHtml(content);
-    try {
-      await this.bot.api.sendMessage(chatId, html, { parse_mode: "HTML" });
-    } catch (e) {
-      logger.warn("telegram", `HTML send failed, falling back to plain text, chatId=${chatId}`, e);
+    const htmlChunks = splitText(html, TG_MSG_LIMIT);
+    const plainChunks = splitText(content, TG_MSG_LIMIT);
+    for (let i = 0; i < htmlChunks.length; i++) {
       try {
-        await this.bot.api.sendMessage(chatId, content);
-      } catch (e2) {
-        logger.error("telegram", `plain text send also failed, chatId=${chatId}`, e2);
+        await this.bot.api.sendMessage(chatId, htmlChunks[i], { parse_mode: "HTML" });
+      } catch (e) {
+        logger.warn("telegram", `HTML send failed, falling back to plain text, chatId=${chatId}`, e);
+        try {
+          await this.bot.api.sendMessage(chatId, plainChunks[i] ?? htmlChunks[i]);
+        } catch (e2) {
+          logger.error("telegram", `plain text send also failed, chatId=${chatId}`, e2);
+        }
       }
     }
   }
