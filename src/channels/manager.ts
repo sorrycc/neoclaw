@@ -1,6 +1,7 @@
 import type { Channel } from "./channel.js";
 import type { MessageBus } from "../bus/message-bus.js";
 import type { Config } from "../config/schema.js";
+import { logger } from "../logger.js";
 import { TelegramChannel } from "./telegram.js";
 import { CLIChannel } from "./cli.js";
 
@@ -45,7 +46,7 @@ export class ChannelManager {
         try {
           await channel.send(msg);
         } catch (err) {
-          console.error(`[dispatch] failed to send to ${msg.channel}:`, err);
+          logger.error("dispatch", `failed to send to ${msg.channel}:`, err);
         }
       }
     }

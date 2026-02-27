@@ -6,6 +6,7 @@ import cronParser from "cron-parser";
 const { parseExpression } = cronParser;
 import type { MessageBus } from "../bus/message-bus.js";
 import type { InboundMessage } from "../bus/types.js";
+import { logger } from "../logger.js";
 
 export interface CronJob {
   id: string;
@@ -45,7 +46,7 @@ export class CronService {
         enabled: j.enabled ?? true,
       }));
     } catch (err) {
-      console.warn("[cron] failed to load jobs, starting fresh:", (err as Error).message);
+      logger.warn("cron", "failed to load jobs, starting fresh:", (err as Error).message);
       this.jobs = [];
     }
   }

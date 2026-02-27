@@ -1,6 +1,7 @@
 import { join } from "path";
 import { homedir } from "os";
 import { existsSync, readFileSync, mkdirSync, writeFileSync, watch, type FSWatcher } from "fs";
+import { logger } from "../logger.js";
 
 export interface TelegramConfig {
   enabled: boolean;
@@ -39,6 +40,7 @@ export interface Config {
   agent: AgentConfig;
   channels: ChannelsConfig;
   providers?: Record<string, ProviderConfig>;
+  logLevel?: string;
 }
 
 export function defaultConfig(baseDir: string): Config {
@@ -56,6 +58,7 @@ export function defaultConfig(baseDir: string): Config {
       telegram: { enabled: false, token: "", allowFrom: [] },
       cli: { enabled: true },
     },
+    logLevel: "info",
   };
 }
 
@@ -111,9 +114,9 @@ export function watchConfig(baseDir: string, onChange: (config: Config) => void)
       try {
         const config = loadConfig(baseDir);
         onChange(config);
-        console.log("[config] reloaded");
+        logger.info("config", "reloaded");
       } catch (e) {
-        console.error("[config] reload failed:", e);
+        logger.error("config", "reload failed:", e);
       }
     }, 500);
   });

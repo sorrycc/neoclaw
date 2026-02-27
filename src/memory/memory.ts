@@ -1,12 +1,13 @@
 import { join } from "path";
 import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } from "fs";
+import { logger } from "../logger.js";
 
 export class MemoryManager {
   private memoryDir: string;
 
   constructor(workspace: string) {
     this.memoryDir = join(workspace, "memory");
-    console.log("[MemoryManager] constructor: memoryDir =", this.memoryDir);
+    logger.debug("memory", "constructor: memoryDir =", this.memoryDir);
     mkdirSync(this.memoryDir, { recursive: true });
   }
 
@@ -19,24 +20,24 @@ export class MemoryManager {
   }
 
   readMemory(): string {
-    console.log("[MemoryManager] readMemory");
+    logger.debug("memory", "readMemory");
     if (!existsSync(this.memoryPath)) return "";
     return readFileSync(this.memoryPath, "utf-8").trim();
   }
 
   writeMemory(content: string): void {
-    console.log("[MemoryManager] writeMemory");
+    logger.debug("memory", "writeMemory");
     writeFileSync(this.memoryPath, content, "utf-8");
   }
 
   appendHistory(entry: string): void {
-    console.log("[MemoryManager] appendHistory");
+    logger.debug("memory", "appendHistory");
     const line = `\n## ${new Date().toISOString()}\n${entry}\n`;
     appendFileSync(this.historyPath, line, "utf-8");
   }
 
   appendHistoryRotated(entry: string): void {
-    console.log("[MemoryManager] appendHistoryRotated");
+    logger.debug("memory", "appendHistoryRotated");
     const now = new Date();
     const line = `\n## ${now.toISOString()}\n${entry}\n`;
 

@@ -12,6 +12,7 @@ import { ConsolidationService } from "../memory/consolidation.js";
 import type { ConversationEntry } from "../memory/types.js";
 import type { Config } from "../config/schema.js";
 import type { CronService } from "../services/cron.js";
+import { logger } from "../logger.js";
 import { createCronTool } from "./tools/cron.js";
 import { createSendFileTool } from "./tools/send-file.js";
 import { createCodeTool } from "./tools/code.js";
@@ -168,7 +169,7 @@ export class NeovateAgent implements Agent {
           const ext = extname(filePath).toLowerCase();
           parts.push({ type: "image", data: buffer.toString("base64"), mimeType: imageMimes[ext] });
         } catch (e) {
-          console.error(`[agent] failed to read media file: ${filePath}`, e);
+          logger.error("agent", `failed to read media file: ${filePath}`, e);
         }
       }
       await sdkSession.send({
@@ -185,7 +186,7 @@ export class NeovateAgent implements Agent {
     let finalContent = "";
     for await (const m of sdkSession.receive()) {
       if (m.type === "system") {
-        console.log(`[agent:init] session=${m.sessionId} model=${m.model} tools=${m.tools.join(",")}`);
+        logger.debug("agent", `init session=${m.sessionId} model=${m.model} tools=${m.tools.join(",")}`);
 
       } else if (m.type === "message" && "role" in m && m.role === "assistant") {
         if (Array.isArray(m.content)) {
@@ -193,10 +194,10 @@ export class NeovateAgent implements Agent {
             if (part.type === "text" && part.text) {
               yield reply(part.text, true);
             } else if (part.type === "reasoning" && part.text) {
-              console.log(`[agent:thinking] ${part.text.slice(0, 120)}`);
+              logger.debug("agent", `thinking: ${part.text.slice(0, 120)}`);
               yield reply(part.text, true);
             } else if (part.type === "tool_use") {
-              console.log(`[agent:tool_use] ${part.displayName || part.name} id=${part.id} input=${JSON.stringify(part.input).slice(0, 100)}`);
+              logger.debug("agent", `tool_use: ${part.displayName || part.name} id=${part.id} input=${JSON.stringify(part.input).slice(0, 100)}`);
             }
           }
         } else {
@@ -209,16 +210,16 @@ export class NeovateAgent implements Agent {
         for (const part of parts) {
           if ("name" in part) {
             const status = (part as any).result?.isError ? "error" : "ok";
-            console.log(`[agent:tool_result] ${(part as any).name} status=${status}`);
+            logger.debug("agent", `tool_result: ${(part as any).name} status=${status}`);
           }
         }
 
       } else if (m.type === "result") {
         finalContent = m.content;
         const status = m.isError ? "error" : "success";
-        console.log(`[agent:result] ${status} content=${JSON.stringify(finalContent).slice(0, 80)}`);
+        logger.debug("agent", `result: ${status} content=${JSON.stringify(finalContent).slice(0, 80)}`);
         if (m.usage) {
-          console.log(`[agent:usage] in=${m.usage.input_tokens} out=${m.usage.output_tokens}`);
+          logger.debug("agent", `usage: in=${m.usage.input_tokens} out=${m.usage.output_tokens}`);
         }
       }
     }
@@ -228,7 +229,7 @@ export class NeovateAgent implements Agent {
     const media = pendingMedia.splice(0);
 
     if (finalContent || media.length > 0) {
-      console.log(`[agent:yield] final content=${JSON.stringify(finalContent).slice(0, 80)} media=${media.length}`);
+      logger.debug("agent", `yield: final content=${JSON.stringify(finalContent).slice(0, 80)} media=${media.length}`);
       yield {
         channel: outChannel, chatId: outChatId, content: finalContent,
         media, metadata: { progress: false },
@@ -255,7 +256,7 @@ export class NeovateAgent implements Agent {
         this.memoryManager.writeMemory(result.memoryUpdate);
       }
     } catch (err) {
-      console.error("[agent] consolidation failed or timed out:", err);
+      logger.error("agent", "consolidation failed or timed out:", err);
       // Fallback: write raw summary so nothing is lost
       const summary = messages
         .filter((m) => m.content)
@@ -308,7 +309,7 @@ export class NeovateAgent implements Agent {
       session.close();
       this.sessions.delete(key);
     }
-    console.log(`[agent] config updated, model=${config.agent.model}`);
+    logger.info("agent", `config updated, model=${config.agent.model}`);
   }
 
   private async resetSession(key: string): Promise<void> {

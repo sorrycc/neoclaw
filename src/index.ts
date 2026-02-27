@@ -7,6 +7,7 @@ import pkg from "../package.json";
 
 const __pkgRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 import { loadConfig, ensureWorkspaceDirs, watchConfig } from "./config/schema.js";
+import { logger, setLevel } from "./logger.js";
 import { MessageBus } from "./bus/message-bus.js";
 import { sessionKey, type InboundMessage } from "./bus/types.js";
 import { ChannelManager } from "./channels/manager.js";
@@ -63,7 +64,7 @@ async function processMsg(bus: MessageBus, agent: NeovateAgent, msg: InboundMess
       bus.publishOutbound(response);
     }
   } catch (err) {
-    console.error("[main] error processing message:", err);
+    logger.error("main", "error processing message:", err);
     bus.publishOutbound({
       channel: msg.channel,
       chatId: msg.chatId,
@@ -134,17 +135,19 @@ async function main(): Promise<void> {
   }
 
   if (!existsSync(baseDir)) {
-    console.error(`[neoclaw] profile not initialized at ${baseDir}`);
-    console.error(`Run: neoclaw onboard${argv.profile ? ` --profile ${argv.profile}` : argv.dev ? " --dev" : ""}`);
+    logger.error("neoclaw", `profile not initialized at ${baseDir}`);
+    logger.error("neoclaw", `Run: neoclaw onboard${argv.profile ? ` --profile ${argv.profile}` : argv.dev ? " --dev" : ""}`);
     process.exit(1);
   }
 
   const config = loadConfig(baseDir);
   ensureWorkspaceDirs(config.agent.workspace);
 
-  console.log("[neoclaw] starting...");
-  console.log(`[neoclaw] model: ${config.agent.model}`);
-  console.log(`[neoclaw] workspace: ${config.agent.workspace}`);
+  if (config.logLevel) setLevel(config.logLevel);
+
+  logger.info("neoclaw", "starting...");
+  logger.info("neoclaw", `model: ${config.agent.model}`);
+  logger.info("neoclaw", `workspace: ${config.agent.workspace}`);
 
   const bus = new MessageBus();
   const cron = new CronService(config.agent.workspace, bus);
@@ -154,12 +157,13 @@ async function main(): Promise<void> {
   const heartbeat = new HeartbeatService(config.agent.workspace, bus);
 
   const configWatcher = watchConfig(baseDir, (newConfig) => {
+    if (newConfig.logLevel) setLevel(newConfig.logLevel);
     agent.updateConfig(newConfig);
     channelManager.updateConfig(newConfig);
   });
 
   process.on("SIGINT", async () => {
-    console.log("\n[neoclaw] shutting down...");
+    logger.info("neoclaw", "shutting down...");
     configWatcher.close();
     await channelManager.stop();
     cron.stop();
@@ -176,6 +180,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error("[neoclaw] fatal:", err);
+  logger.error("neoclaw", "fatal:", err);
   process.exit(1);
 });

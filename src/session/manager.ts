@@ -1,5 +1,6 @@
 import { join } from "path";
 import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } from "fs";
+import { logger } from "../logger.js";
 
 interface SessionEntry {
   role: string;
@@ -28,7 +29,7 @@ export class SessionManager {
 
   constructor(workspace: string) {
     this.sessionsDir = join(workspace, "..", "sessions");
-    console.log("[SessionManager] constructor: sessionsDir =", this.sessionsDir);
+    logger.debug("session", "constructor: sessionsDir =", this.sessionsDir);
     mkdirSync(this.sessionsDir, { recursive: true });
   }
 
@@ -38,7 +39,7 @@ export class SessionManager {
   }
 
   get(key: string): Session {
-    console.log("[SessionManager] get:", key);
+    logger.debug("session", "get:", key);
     const cached = this.cache.get(key);
     if (cached) return cached;
 
@@ -63,7 +64,7 @@ export class SessionManager {
   }
 
   append(key: string, role: string, content: string): void {
-    console.log("[SessionManager] append:", key, role);
+    logger.debug("session", "append:", key, role);
     const session = this.get(key);
     const entry: SessionEntry = { role, content, timestamp: new Date().toISOString() };
     session.messages.push(entry);
@@ -77,7 +78,7 @@ export class SessionManager {
   }
 
   clear(key: string): void {
-    console.log("[SessionManager] clear:", key);
+    logger.debug("session", "clear:", key);
     const path = this.filePath(key);
     const meta: SessionMeta = { _type: "metadata", key, createdAt: new Date().toISOString(), lastConsolidated: 0 };
     writeFileSync(path, JSON.stringify(meta) + "\n", "utf-8");
@@ -85,14 +86,14 @@ export class SessionManager {
   }
 
   updateConsolidated(key: string, index: number): void {
-    console.log("[SessionManager] updateConsolidated:", key, index);
+    logger.debug("session", "updateConsolidated:", key, index);
     const session = this.get(key);
     session.lastConsolidated = index;
     this.flush(key);
   }
 
   trimBefore(key: string, keepFrom: number): void {
-    console.log("[SessionManager] trimBefore:", key, keepFrom);
+    logger.debug("session", "trimBefore:", key, keepFrom);
     const session = this.get(key);
     session.messages = session.messages.slice(keepFrom);
     session.lastConsolidated = 0;
@@ -115,7 +116,7 @@ export class SessionManager {
 
   messageCount(key: string): number {
     const count = this.get(key).messages.length;
-    console.log("[SessionManager] messageCount:", key, count);
+    logger.debug("session", "messageCount:", key, count);
     return count;
   }
 }

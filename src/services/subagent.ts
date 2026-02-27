@@ -2,6 +2,7 @@ import { createSession, type SDKSession } from "@neovate/code";
 import type { MessageBus } from "../bus/message-bus.js";
 import type { InboundMessage } from "../bus/types.js";
 import type { Config } from "../config/schema.js";
+import { logger } from "../logger.js";
 
 interface SubagentTask {
   id: string;
@@ -33,7 +34,7 @@ export class SubagentManager {
     this.tasks.set(id, task);
 
     this.runTask(task, taskPrompt).catch((err) => {
-      console.error(`[subagent:${id}] failed:`, err);
+      logger.error("subagent", `${id} failed:`, err);
     });
 
     return id;

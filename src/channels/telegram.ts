@@ -7,6 +7,7 @@ import type { Channel } from "./channel.js";
 import type { MessageBus } from "../bus/message-bus.js";
 import type { TelegramConfig } from "../config/schema.js";
 import type { OutboundMessage, InboundMessage } from "../bus/types.js";
+import { logger } from "../logger.js";
 
 function mdToTelegramHtml(md: string): string {
   const codeBlocks: string[] = [];
@@ -109,7 +110,7 @@ export class TelegramChannel implements Channel {
 
     const me = await this.bot.api.getMe();
     this.botUsername = me.username ?? "";
-    console.log("[Telegram] bot username:", this.botUsername);
+    logger.info("telegram", "bot username:", this.botUsername);
 
     this.bot.command("start", (ctx) => ctx.reply("neoclaw ready."));
 
@@ -137,16 +138,16 @@ export class TelegramChannel implements Channel {
 
     this.bot.on("message:text", (ctx) => {
       const senderId = `${ctx.from?.id}|${ctx.from?.username ?? ""}`;
-      console.log("[Telegram] message:text", { text: ctx.message.text, chatType: ctx.chat.type, senderId, chatId: ctx.chat.id });
+      logger.debug("telegram", "message:text", { text: ctx.message.text, chatType: ctx.chat.type, senderId, chatId: ctx.chat.id });
       if (!this.isAllowed(senderId)) {
-        console.log("[Telegram] blocked by allowFrom, senderId:", senderId);
+        logger.debug("telegram", "blocked by allowFrom, senderId:", senderId);
         return;
       }
 
       if (this.isGroupChat(ctx.chat.type)) {
         const { mentioned, cleaned } = this.extractMention(ctx.message.text);
         const isReply = this.isReplyToBot(ctx);
-        console.log("[Telegram] group check", { mentioned, cleaned, isReply });
+        logger.debug("telegram", "group check", { mentioned, cleaned, isReply });
         if (!mentioned && !isReply) return;
         const content = mentioned ? cleaned : ctx.message.text;
         if (!content) return;
@@ -161,9 +162,9 @@ export class TelegramChannel implements Channel {
 
     this.bot.on("message:photo", async (ctx) => {
       const senderId = `${ctx.from?.id}|${ctx.from?.username ?? ""}`;
-      console.log("[Telegram] message:photo", { chatType: ctx.chat.type, senderId, chatId: ctx.chat.id });
+      logger.debug("telegram", "message:photo", { chatType: ctx.chat.type, senderId, chatId: ctx.chat.id });
       if (!this.isAllowed(senderId)) {
-        console.log("[Telegram] blocked by allowFrom, senderId:", senderId);
+        logger.debug("telegram", "blocked by allowFrom, senderId:", senderId);
         return;
       }
       const caption = ctx.message.caption ?? "";
@@ -173,7 +174,7 @@ export class TelegramChannel implements Channel {
       if (this.isGroupChat(ctx.chat.type)) {
         const { mentioned, cleaned } = this.extractMention(caption);
         const isReply = this.isReplyToBot(ctx);
-        console.log("[Telegram] group photo check", { mentioned, cleaned, isReply });
+        logger.debug("telegram", "group photo check", { mentioned, cleaned, isReply });
         if (!mentioned && !isReply) return;
         this.startTyping(ctx.chat.id.toString());
         this.publishInbound(ctx.chat.id.toString(), senderId, mentioned ? cleaned : caption, media);
@@ -186,7 +187,7 @@ export class TelegramChannel implements Channel {
 
     this.bot.on("message:document", async (ctx) => {
       const senderId = `${ctx.from?.id}|${ctx.from?.username ?? ""}`;
-      console.log("[Telegram] message:document", { chatType: ctx.chat.type, senderId, chatId: ctx.chat.id });
+      logger.debug("telegram", "message:document", { chatType: ctx.chat.type, senderId, chatId: ctx.chat.id });
       if (!this.isAllowed(senderId)) return;
       const caption = ctx.message.caption ?? "";
       const doc = ctx.message.document;
@@ -196,7 +197,7 @@ export class TelegramChannel implements Channel {
 
     this.bot.on("message:video", async (ctx) => {
       const senderId = `${ctx.from?.id}|${ctx.from?.username ?? ""}`;
-      console.log("[Telegram] message:video", { chatType: ctx.chat.type, senderId, chatId: ctx.chat.id });
+      logger.debug("telegram", "message:video", { chatType: ctx.chat.type, senderId, chatId: ctx.chat.id });
       if (!this.isAllowed(senderId)) return;
       const caption = ctx.message.caption ?? "";
       const media = await this.downloadFile(ctx.message.video.file_id, "mp4");
@@ -205,7 +206,7 @@ export class TelegramChannel implements Channel {
 
     this.bot.on("message:audio", async (ctx) => {
       const senderId = `${ctx.from?.id}|${ctx.from?.username ?? ""}`;
-      console.log("[Telegram] message:audio", { chatType: ctx.chat.type, senderId, chatId: ctx.chat.id });
+      logger.debug("telegram", "message:audio", { chatType: ctx.chat.type, senderId, chatId: ctx.chat.id });
       if (!this.isAllowed(senderId)) return;
       const caption = ctx.message.caption ?? "";
       const audio = ctx.message.audio;
@@ -340,7 +341,7 @@ export class TelegramChannel implements Channel {
     for (const name of this.getSkillNames()) {
       const command = name.replace(/-/g, "_");
       if (!/^[a-z0-9_]+$/.test(command)) {
-        console.warn(`[Telegram] skipping skill command /${name}: contains invalid characters`);
+        logger.warn("telegram", `skipping skill command /${name}: contains invalid characters`);
         continue;
       }
       result.push({ original: name, command });
@@ -376,7 +377,7 @@ export class TelegramChannel implements Channel {
       { command: "help", description: "Show available commands" },
       ...validSkills.map((s) => ({ command: s.command, description: s.original })),
     ];
-    this.bot.api.setMyCommands(commands).then(() => console.log("[Telegram] commands registered:", commands.map((c) => c.command).join(", "))).catch((e) => console.error("[Telegram] setMyCommands failed:", e));
+    this.bot.api.setMyCommands(commands).then(() => logger.info("telegram", "commands registered:", commands.map((c) => c.command).join(", "))).catch((e) => logger.error("telegram", "setMyCommands failed:", e));
   }
 
   private watchSkillsDir(): void {
@@ -392,7 +393,7 @@ export class TelegramChannel implements Channel {
 
   updateConfig(config: TelegramConfig): void {
     this.config = config;
-    console.log(`[Telegram] config updated, allowFrom=${config.allowFrom.join(",")}`);
+    logger.info("telegram", `config updated, allowFrom=${config.allowFrom.join(",")}`);
   }
 
   private async downloadFile(fileId: string, fallbackExt = "bin", fileName?: string): Promise<string[]> {
@@ -401,7 +402,7 @@ export class TelegramChannel implements Channel {
       const url = `https://api.telegram.org/file/bot${this.config.token}/${file.file_path}`;
       const res = await fetch(url);
       if (!res.ok) {
-        console.error("[Telegram] file download failed:", res.status);
+        logger.error("telegram", "file download failed:", res.status);
         return [];
       }
       const buffer = Buffer.from(await res.arrayBuffer());
@@ -411,10 +412,10 @@ export class TelegramChannel implements Channel {
       const name = fileName ?? `file_${crypto.randomUUID()}.${ext}`;
       const filePath = join(tmpDir, name);
       writeFileSync(filePath, buffer);
-      console.log("[Telegram] file saved:", filePath);
+      logger.debug("telegram", "file saved:", filePath);
       return [filePath];
     } catch (e) {
-      console.error("[Telegram] file download error:", e);
+      logger.error("telegram", "file download error:", e);
       return [];
     }
   }
