@@ -21,6 +21,7 @@ export interface DingtalkConfig {
   robotCode: string;
   corpId?: string;
   allowFrom: string[];
+  keepAlive?: boolean;
 }
 
 export interface ChannelsConfig {

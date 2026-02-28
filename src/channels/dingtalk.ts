@@ -183,7 +183,7 @@ export class DingtalkChannel implements Channel {
       clientId: this.config.clientId,
       clientSecret: this.config.clientSecret,
       debug: false,
-      keepAlive: true,
+      keepAlive: this.config.keepAlive ?? false,
     });
 
     this.dedupCleanupTimer = setInterval(() => {
