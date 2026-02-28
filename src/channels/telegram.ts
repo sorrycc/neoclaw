@@ -25,7 +25,11 @@ function mdToTelegramHtml(md: string): string {
   text = text.replace(/^#{1,6}\s+/gm, "");
   text = text.replace(/^>\s?/gm, "");
   text = escapeHtml(text);
-  text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+  const links: string[] = [];
+  text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, url) => {
+    links.push(`<a href="${url}">${label}</a>`);
+    return `%%LINK${links.length - 1}%%`;
+  });
   text = text.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
   text = text.replace(/__(.+?)__/g, "<b>$1</b>");
   text = text.replace(/\*(.+?)\*/g, "<i>$1</i>");
@@ -33,6 +37,7 @@ function mdToTelegramHtml(md: string): string {
   text = text.replace(/~~(.+?)~~/g, "<s>$1</s>");
   text = text.replace(/^- /gm, "• ");
 
+  text = text.replace(/%%LINK(\d+)%%/g, (_, i) => links[Number(i)]);
   text = text.replace(/%%CODEBLOCK(\d+)%%/g, (_, i) => codeBlocks[Number(i)]);
   text = text.replace(/%%INLINE(\d+)%%/g, (_, i) => inlineCodes[Number(i)]);
 
