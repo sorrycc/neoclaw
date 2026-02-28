@@ -7,70 +7,74 @@ import type { MessageBus } from "../bus/message-bus.js";
 import type { TelegramConfig } from "../config/schema.js";
 import type { OutboundMessage, InboundMessage } from "../bus/types.js";
 import { logger } from "../logger.js";
-
-function mdToTelegramHtml(md: string): string {
-  const codeBlocks: string[] = [];
-  const inlineCodes: string[] = [];
-
-  let text = md.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
-    codeBlocks.push(`<pre><code${lang ? ` class="language-${lang}"` : ""}>${escapeHtml(code.trimEnd())}</code></pre>`);
-    return `%%CODEBLOCK${codeBlocks.length - 1}%%`;
-  });
-
-  text = text.replace(/`([^`]+)`/g, (_, code) => {
-    inlineCodes.push(`<code>${escapeHtml(code)}</code>`);
-    return `%%INLINE${inlineCodes.length - 1}%%`;
-  });
-
-  text = text.replace(/^#{1,6}\s+/gm, "");
-  text = text.replace(/^>\s?/gm, "");
-  text = escapeHtml(text);
-  const links: string[] = [];
-  text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, url) => {
-    links.push(`<a href="${url}">${label}</a>`);
-    return `%%LINK${links.length - 1}%%`;
-  });
-  text = text.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
-  text = text.replace(/__(.+?)__/g, "<b>$1</b>");
-  text = text.replace(/\*(.+?)\*/g, "<i>$1</i>");
-  text = text.replace(/_(.+?)_/g, "<i>$1</i>");
-  text = text.replace(/~~(.+?)~~/g, "<s>$1</s>");
-  text = text.replace(/^- /gm, "• ");
-
-  text = text.replace(/%%LINK(\d+)%%/g, (_, i) => links[Number(i)]);
-  text = text.replace(/%%CODEBLOCK(\d+)%%/g, (_, i) => codeBlocks[Number(i)]);
-  text = text.replace(/%%INLINE(\d+)%%/g, (_, i) => inlineCodes[Number(i)]);
-
-  return text;
-}
+import { markdownToIR, chunkMarkdownIR, type MarkdownLinkSpan } from "../markdown/ir.js";
+import { renderMarkdownWithMarkers } from "../markdown/render.js";
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+function escapeHtmlAttr(s: string): string {
+  return escapeHtml(s).replace(/"/g, "&quot;");
+}
+
+function buildTelegramLink(link: MarkdownLinkSpan, _text: string) {
+  const href = link.href.trim();
+  if (!href || link.start === link.end) return null;
+  return {
+    start: link.start,
+    end: link.end,
+    open: `<a href="${escapeHtmlAttr(href)}">`,
+    close: "</a>",
+  };
+}
+
+const TELEGRAM_STYLE_MARKERS = {
+  bold: { open: "<b>", close: "</b>" },
+  italic: { open: "<i>", close: "</i>" },
+  strikethrough: { open: "<s>", close: "</s>" },
+  code: { open: "<code>", close: "</code>" },
+  code_block: { open: "<pre><code>", close: "</code></pre>" },
+  spoiler: { open: "<tg-spoiler>", close: "</tg-spoiler>" },
+  blockquote: { open: "<blockquote>", close: "</blockquote>" },
+} as const;
+
+function mdToTelegramHtml(md: string): string {
+  const ir = markdownToIR(md ?? "", {
+    linkify: true,
+    enableSpoilers: true,
+    headingStyle: "none",
+    blockquotePrefix: "",
+  });
+  return renderMarkdownWithMarkers(ir, {
+    styleMarkers: TELEGRAM_STYLE_MARKERS,
+    escapeText: escapeHtml,
+    buildLink: buildTelegramLink,
+  });
+}
+
+type TelegramFormattedChunk = { html: string; text: string };
+
+function mdToTelegramChunks(md: string, limit: number): TelegramFormattedChunk[] {
+  const ir = markdownToIR(md ?? "", {
+    linkify: true,
+    enableSpoilers: true,
+    headingStyle: "none",
+    blockquotePrefix: "",
+  });
+  const chunks = chunkMarkdownIR(ir, limit);
+  return chunks.map((chunk) => ({
+    html: renderMarkdownWithMarkers(chunk, {
+      styleMarkers: TELEGRAM_STYLE_MARKERS,
+      escapeText: escapeHtml,
+      buildLink: buildTelegramLink,
+    }),
+    text: chunk.text,
+  }));
+}
+
 const CAPTION_LIMIT = 1024;
 const TG_MSG_LIMIT = 4096;
-
-function splitText(text: string, limit: number): string[] {
-  if (text.length <= limit) return [text];
-  const chunks: string[] = [];
-  let remaining = text;
-  while (remaining.length > 0) {
-    if (remaining.length <= limit) {
-      chunks.push(remaining);
-      break;
-    }
-    const slice = remaining.slice(0, limit);
-    // prefer splitting at double-newline, then single-newline, then last space
-    let splitAt = slice.lastIndexOf("\n\n");
-    if (splitAt < limit * 0.3) splitAt = slice.lastIndexOf("\n");
-    if (splitAt < limit * 0.3) splitAt = slice.lastIndexOf(" ");
-    if (splitAt < limit * 0.3) splitAt = limit; // hard cut as last resort
-    chunks.push(remaining.slice(0, splitAt).trimEnd());
-    remaining = remaining.slice(splitAt).trimStart();
-  }
-  return chunks;
-}
 
 function isUrl(s: string): boolean {
   return s.startsWith("http://") || s.startsWith("https://");
@@ -282,16 +286,14 @@ export class TelegramChannel implements Channel {
   }
 
   private async sendText(chatId: number, content: string): Promise<void> {
-    const html = mdToTelegramHtml(content);
-    const htmlChunks = splitText(html, TG_MSG_LIMIT);
-    const plainChunks = splitText(content, TG_MSG_LIMIT);
-    for (let i = 0; i < htmlChunks.length; i++) {
+    const chunks = mdToTelegramChunks(content, TG_MSG_LIMIT);
+    for (const chunk of chunks) {
       try {
-        await this.bot.api.sendMessage(chatId, htmlChunks[i], { parse_mode: "HTML" });
+        await this.bot.api.sendMessage(chatId, chunk.html, { parse_mode: "HTML" });
       } catch (e) {
         logger.warn("telegram", `HTML send failed, falling back to plain text, chatId=${chatId}`, e);
         try {
-          await this.bot.api.sendMessage(chatId, plainChunks[i] ?? htmlChunks[i]);
+          await this.bot.api.sendMessage(chatId, chunk.text);
         } catch (e2) {
           logger.error("telegram", `plain text send also failed, chatId=${chatId}`, e2);
         }
