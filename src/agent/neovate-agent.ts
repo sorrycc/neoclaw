@@ -65,7 +65,18 @@ export class NeovateAgent implements Agent {
     if (commandResult) return;
 
     // Manage session window (consolidate + trim if needed)
-    const sessionRecap = await this.manageSessionWindow(key);
+    let sessionRecap = await this.manageSessionWindow(key);
+
+    // On cold restart: no SDK session but persisted messages exist — build recap
+    if (!sessionRecap && !this.sessions.has(key)) {
+      const existing = await this.sessionManager.get(key);
+      if (existing.messages.length > 0) {
+        sessionRecap = existing.messages
+          .filter((m) => m.content)
+          .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
+          .join("\n");
+      }
+    }
 
     // Ensure SDK session exists
     const mediaQueue = this.ensureMediaQueue(key);
