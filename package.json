@@ -24,6 +24,7 @@
     "dingtalk-stream": "^2.1.4",
     "form-data": "^4.0.5",
     "grammy": "^1.31.0",
+    "gray-matter": "^4.0.3",
     "markdown-it": "^14.1.1",
     "yargs-parser": "^22.0.0"
   },

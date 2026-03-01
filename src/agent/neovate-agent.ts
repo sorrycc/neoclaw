@@ -131,8 +131,8 @@ export class NeovateAgent implements Agent {
     }
 
     if (msg.content === "/help") {
-      const skills = await this.skillManager.getSkillNames();
-      const skillLines = skills.map((s) => `/${s}`).join("\n");
+      const skills = await this.skillManager.getSkills();
+      const skillLines = skills.map((s) => s.description ? `/${s.name} - ${s.description}` : `/${s.name}`).join("\n");
       const base = "Commands:\n/new - Start a new session\n/stop - Stop the current agent\n/help - Show this help";
       yield reply(skillLines ? `${base}\n\nSkills:\n${skillLines}` : base);
       return true;

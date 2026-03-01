@@ -1,5 +1,11 @@
 import { join } from "path";
 import { readdir, stat, readFile, access } from "fs/promises";
+import matter from "gray-matter";
+
+export interface SkillInfo {
+  name: string;
+  description: string;
+}
 
 export class SkillManager {
   constructor(private workspace: string) {}
@@ -8,27 +14,36 @@ export class SkillManager {
     return join(this.workspace, "skills");
   }
 
-  async getSkillNames(): Promise<string[]> {
+  async getSkills(): Promise<SkillInfo[]> {
     try {
       await access(this.skillsDir);
     } catch {
       return [];
     }
     const entries = await readdir(this.skillsDir);
-    const names: string[] = [];
+    const skills: SkillInfo[] = [];
     for (const entry of entries) {
       const skillPath = join(this.skillsDir, entry);
       const s = await stat(skillPath);
-      if (s.isDirectory()) {
-        try {
-          await access(join(skillPath, "SKILL.md"));
-          names.push(entry);
-        } catch {
-          // no SKILL.md, skip
-        }
+      if (!s.isDirectory()) continue;
+      const skillFile = join(skillPath, "SKILL.md");
+      try {
+        await access(skillFile);
+      } catch {
+        continue;
       }
+      const raw = await readFile(skillFile, "utf-8");
+      const { data } = matter(raw);
+      skills.push({
+        name: data.name ?? entry,
+        description: data.description ?? "",
+      });
     }
-    return names;
+    return skills;
+  }
+
+  async getSkillNames(): Promise<string[]> {
+    return (await this.getSkills()).map((s) => s.name);
   }
 
   async getSkillPaths(): Promise<string[]> {
@@ -64,8 +79,8 @@ export class SkillManager {
       return null;
     }
     const raw = await readFile(skillFile, "utf-8");
-    const body = raw.replace(/^---[\s\S]*?---\n*/, "").trim();
-    let p = `Base directory for this skill: ${skillDir}\n\n${body}`;
+    const { content: body } = matter(raw);
+    let p = `Base directory for this skill: ${skillDir}\n\n${body.trim()}`;
     const hasPositional = /\$[1-9]\d*/.test(p);
     if (hasPositional) {
       const parsed = args.split(" ");
