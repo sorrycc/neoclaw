@@ -18,6 +18,9 @@ import { logger } from "../logger.js";
 import { createCronTool } from "./tools/cron.js";
 import { createSendFileTool } from "./tools/send-file.js";
 import { createCodeTool } from "./tools/code.js";
+import { createSpawnTool } from "./tools/spawn.js";
+import { SubagentManager } from "../services/subagent.js";
+import type { MessageBus } from "../bus/message-bus.js";
 
 export class NeovateAgent implements Agent {
   private sessions = new Map<string, SDKSession>();
@@ -27,10 +30,12 @@ export class NeovateAgent implements Agent {
   private sessionManager: SessionManager;
   private memoryManager: MemoryManager;
   private consolidationService: ConsolidationService;
+  private subagentManager: SubagentManager;
 
   private constructor(
     private config: Config,
     private cronService: CronService,
+    private bus: MessageBus,
     sessionManager: SessionManager,
     memoryManager: MemoryManager,
   ) {
@@ -38,6 +43,7 @@ export class NeovateAgent implements Agent {
     this.contextBuilder = new ContextBuilder(config.agent.workspace, this.memoryManager);
     this.skillManager = new SkillManager(config.agent.workspace);
     this.sessionManager = sessionManager;
+    this.subagentManager = new SubagentManager(config, bus);
     this.consolidationService = new ConsolidationService(
       (message, options) => prompt(message, options),
       config.agent.model,
@@ -45,11 +51,11 @@ export class NeovateAgent implements Agent {
     );
   }
 
-  static async create(config: Config, cronService: CronService): Promise<NeovateAgent> {
+  static async create(config: Config, cronService: CronService, bus: MessageBus): Promise<NeovateAgent> {
     const sessionsDir = join(config.agent.workspace, "..", "sessions");
     const sessionManager = await SessionManager.create(sessionsDir);
     const memoryManager = await MemoryManager.create(config.agent.workspace);
-    return new NeovateAgent(config, cronService, sessionManager, memoryManager);
+    return new NeovateAgent(config, cronService, bus, sessionManager, memoryManager);
   }
 
   async *processMessage(msg: InboundMessage): AsyncGenerator<OutboundMessage> {
@@ -194,6 +200,7 @@ export class NeovateAgent implements Agent {
     const cronTool = createCronTool({ cronService: this.cronService, channel: msg.channel, chatId: msg.chatId });
     const sendFileTool = createSendFileTool({ mediaQueue, workspace: this.config.agent.workspace });
     const codeTool = createCodeTool({ config: this.config });
+    const spawnTool = createSpawnTool({ subagentManager: this.subagentManager, channel: msg.channel, chatId: msg.chatId });
     const recapSection = sessionRecap
       ? `\n\n## Recent Conversation Recap\nThe session was trimmed for context management. Here is a recap of recent messages:\n${sessionRecap}`
       : "";
@@ -208,14 +215,14 @@ export class NeovateAgent implements Agent {
           config() {
             return {
               outputStyle: 'Minimal',
-              tools: { ExitPlanMode: false, AskUserQuestion: false },
+              tools: { task: false, ExitPlanMode: false, AskUserQuestion: false },
             };
           },
           systemPrompt(original) {
             return `${original}\n\n${systemContext}${recapSection}`;
           },
           tool() {
-            return [cronTool, sendFileTool, codeTool];
+            return [cronTool, sendFileTool, codeTool, spawnTool];
           },
         }
       ],

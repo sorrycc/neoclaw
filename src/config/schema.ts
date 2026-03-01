@@ -37,6 +37,7 @@ export interface AgentConfig {
   workspace: string;
   maxMemorySize?: number;
   consolidationTimeout?: number;
+  subagentTimeout?: number;
 }
 
 export interface Config {

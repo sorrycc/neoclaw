@@ -165,7 +165,7 @@ async function main(): Promise<void> {
   const bus = new MessageBus();
   const cron = new CronService(config.agent.workspace, bus);
   await cron.init();
-  const agent = await NeovateAgent.create(config, cron);
+  const agent = await NeovateAgent.create(config, cron, bus);
   const channelManager = new ChannelManager(config, bus);
   const heartbeat = new HeartbeatService(config.agent.workspace, bus);
 
