@@ -17,6 +17,7 @@ import { HeartbeatService } from "./services/heartbeat.js";
 import { handleCronCommand } from "./commands/cron.js";
 import { handleStatusCommand } from "./commands/status.js";
 import { handleOnboardCommand } from "./commands/onboard.js";
+import { handleWebCommand } from "./commands/web.js";
 
 function showHelp(): void {
   console.log(`neoclaw v${pkg.version} - A multi-channel AI agent
@@ -28,11 +29,17 @@ Commands:
   status       Show agent status and cron jobs
   onboard      Initialize workspace and configuration
   cron         Manage scheduled tasks
+  web          Start web configuration UI
   help         Show this help message
 
 Options:
   --profile <name>  Use a named profile (~/.neoclaw-<name>)
   --dev             Use dev profile (~/.neoclaw-dev)
+  --mode <mode>     Onboard mode (for onboard command): default|web
+  --host <host>     Web UI bind host (for web / onboard --mode web)
+  --port <port>     Web UI bind port (for web / onboard --mode web)
+  --token <token>   Web UI auth token (for web / onboard --mode web)
+  -y, --yes         Auto-confirm prompts (for onboard command)
   -h, --help        Show this help message
   -v, --version     Print version and exit`);
 }
@@ -54,6 +61,30 @@ function resolveBaseDir(argv: yargsParser.Arguments): string {
   return resolved
     ? join(homedir(), `.neoclaw-${resolved}`)
     : join(homedir(), ".neoclaw");
+}
+
+function resolveOnboardMode(argv: yargsParser.Arguments): "default" | "web" {
+  const raw = argv.mode;
+  if (raw === undefined) return "default";
+  if (typeof raw !== "string") {
+    console.error("Error: --mode requires a value (default|web)");
+    process.exit(1);
+  }
+
+  const mode = raw.trim().toLowerCase();
+  if (mode === "default" || mode === "file") return "default";
+  if (mode === "web") return "web";
+
+  console.error(`Error: invalid --mode "${raw}", expected default|web`);
+  process.exit(1);
+}
+
+function resolveWebOptions(argv: yargsParser.Arguments): { host?: string; port?: number; token?: string } {
+  return {
+    host: typeof argv.host === "string" ? argv.host : undefined,
+    port: typeof argv.port === "number" ? argv.port : typeof argv.port === "string" ? Number(argv.port) : undefined,
+    token: typeof argv.token === "string" ? argv.token : undefined,
+  };
 }
 
 const INTERRUPT_COMMANDS = new Set(["/stop"]);
@@ -121,13 +152,23 @@ async function main(): Promise<void> {
 
   if (subcommand === "onboard") {
     const flag = argv.profile ? ` --profile ${argv.profile}` : argv.dev ? " --dev" : "";
+    const mode = resolveOnboardMode(argv);
     const result = await handleOnboardCommand({
       baseDir,
       pkgRoot: __pkgRoot,
       profileFlag: flag,
       force: !!(argv.yes || argv.y),
+      mode,
     });
     console.log(result);
+
+    if (mode === "web") {
+      await handleWebCommand({
+        baseDir,
+        ...resolveWebOptions(argv),
+      });
+    }
+
     process.exit(0);
   }
 
@@ -139,6 +180,14 @@ async function main(): Promise<void> {
     await cron.init();
     const args = argv._.slice(1).map(String);
     console.log(await handleCronCommand(cron, args));
+    process.exit(0);
+  }
+
+  if (subcommand === "web") {
+    await handleWebCommand({
+      baseDir,
+      ...resolveWebOptions(argv),
+    });
     process.exit(0);
   }
 
@@ -169,10 +218,14 @@ async function main(): Promise<void> {
   const channelManager = new ChannelManager(config, bus);
   const heartbeat = new HeartbeatService(config.agent.workspace, bus);
 
-  const configWatcher = watchConfig(baseDir, (newConfig) => {
+  const configWatcher = watchConfig(baseDir, async (newConfig) => {
     if (newConfig.logLevel) setLevel(newConfig.logLevel);
     agent.updateConfig(newConfig);
-    channelManager.updateConfig(newConfig);
+    try {
+      await channelManager.updateConfig(newConfig);
+    } catch (err) {
+      logger.error("neoclaw", "failed to dynamically update channels:", err);
+    }
   });
 
   process.on("SIGINT", async () => {
