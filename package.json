@@ -14,7 +14,8 @@
     "dev": "bun --watch run src/index.ts",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist",
-    "build": "bun build src/index.ts --outdir dist --target node --packages external && printf '#!/usr/bin/env node\n' | cat - dist/index.js > dist/_tmp && mv dist/_tmp dist/index.js",
+    "build:web": "cd webapp && bun run build && rm -rf ../dist/web && cp -r dist ../dist/web",
+    "build": "bun build src/index.ts --outdir dist --target node --packages external && printf '#!/usr/bin/env node\\n' | cat - dist/index.js > dist/_tmp && mv dist/_tmp dist/index.js && bun run build:web",
     "release": "npm run clean && npm run build && npm version patch && npm publish"
   },
   "dependencies": {

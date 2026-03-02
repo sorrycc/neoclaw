@@ -22,9 +22,44 @@ export class ChannelManager {
     }
   }
 
-  updateConfig(config: Config): void {
-    for (const channel of this.channels.values()) {
-      channel.updateConfig?.(config.channels[channel.name as keyof typeof config.channels]);
+  async updateConfig(newConfig: Config): Promise<void> {
+    const oldConfig = this.config;
+    this.config = newConfig;
+
+    // CLI
+    if (newConfig.channels.cli.enabled && !this.channels.has("cli")) {
+      const cli = new CLIChannel(this.bus);
+      this.channels.set("cli", cli);
+      if (this.running) await cli.start();
+    } else if (!newConfig.channels.cli.enabled && this.channels.has("cli")) {
+      await this.channels.get("cli")!.stop();
+      this.channels.delete("cli");
+    } else if (newConfig.channels.cli.enabled && this.channels.has("cli")) {
+      this.channels.get("cli")!.updateConfig?.(newConfig.channels.cli);
+    }
+
+    // Telegram
+    if (newConfig.channels.telegram.enabled && !this.channels.has("telegram")) {
+      const tg = new TelegramChannel(newConfig.channels.telegram, this.bus, newConfig.agent.workspace);
+      this.channels.set("telegram", tg);
+      if (this.running) await tg.start();
+    } else if (!newConfig.channels.telegram.enabled && this.channels.has("telegram")) {
+      await this.channels.get("telegram")!.stop();
+      this.channels.delete("telegram");
+    } else if (newConfig.channels.telegram.enabled && this.channels.has("telegram")) {
+      this.channels.get("telegram")!.updateConfig?.(newConfig.channels.telegram);
+    }
+
+    // Dingtalk
+    if (newConfig.channels.dingtalk.enabled && !this.channels.has("dingtalk")) {
+      const dt = new DingtalkChannel(newConfig.channels.dingtalk, this.bus);
+      this.channels.set("dingtalk", dt);
+      if (this.running) await dt.start();
+    } else if (!newConfig.channels.dingtalk.enabled && this.channels.has("dingtalk")) {
+      await this.channels.get("dingtalk")!.stop();
+      this.channels.delete("dingtalk");
+    } else if (newConfig.channels.dingtalk.enabled && this.channels.has("dingtalk")) {
+      this.channels.get("dingtalk")!.updateConfig?.(newConfig.channels.dingtalk);
     }
   }
 
