@@ -77,7 +77,7 @@ export function defaultConfig(baseDir: string): Config {
       memoryWindow: 50,
       workspace: join(baseDir, "workspace"),
       maxMemorySize: 40960,
-      consolidationTimeout: 30000,
+      consolidationTimeout: 60000,
     },
     channels: {
       telegram: { enabled: false, token: "", allowFrom: [] },
