@@ -3,7 +3,9 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import type { Config } from "../../config/schema.js";
 import {
+  buildOpenAiCompatibleModelsUrl,
   createConfigSnapshot,
+  discoverOpenAiCompatibleModels,
   ensureWebUiBuilt,
   hasConfigFile,
   listConfigSnapshots,
@@ -107,6 +109,35 @@ describe("web command helpers", () => {
 
     expect(calls).toBe(0);
     expect(resolved).toBe(webappDist);
+  });
+
+  it("builds compatible models URL and prefixes discovered custom models", async () => {
+    expect(buildOpenAiCompatibleModelsUrl("https://api.example.com/v1/")).toBe("https://api.example.com/v1/models");
+
+    const models = await discoverOpenAiCompatibleModels(
+      "custom-1",
+      "https://api.example.com/v1",
+      "sk-test",
+      async (input, init) => {
+        expect(String(input)).toBe("https://api.example.com/v1/models");
+        expect(init?.headers).toMatchObject({ Authorization: "Bearer sk-test" });
+        return new Response(JSON.stringify({
+          data: [
+            { id: "gpt-4.1" },
+            { id: "gpt-4.1" },
+            { id: "o3-mini" },
+          ],
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      },
+    );
+
+    expect(models).toEqual([
+      { label: "gpt-4.1", value: "custom-1/gpt-4.1" },
+      { label: "o3-mini", value: "custom-1/o3-mini" },
+    ]);
   });
 
   it("builds web dist automatically when missing and deps exist", () => {

@@ -47,6 +47,8 @@ type EnsureWebUiBuiltOptions = {
 };
 
 type RateState = { count: number; resetAt: number };
+type ModelOption = { label: string; value: string };
+type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 const BODY_LIMIT = 1024 * 1024;
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
@@ -388,6 +390,110 @@ function mergeImportedConfig(current: Config, incoming: unknown): Config {
   };
 
   return next;
+}
+
+export function buildOpenAiCompatibleModelsUrl(baseURL: string): string {
+  const raw = baseURL.trim();
+  if (!raw) throw new Error("baseURL required");
+  const url = new URL(raw);
+  const pathname = url.pathname.replace(/\/+$/, "");
+  url.pathname = pathname.endsWith("/models") ? pathname : `${pathname || ""}/models`;
+  url.search = "";
+  url.hash = "";
+  return url.toString();
+}
+
+function toModelOptions(providerId: string, modelIds: string[]): ModelOption[] {
+  return modelIds.map((modelId) => ({
+    label: modelId,
+    value: `${providerId}/${modelId}`,
+  }));
+}
+
+function toCustomProviderModelsMap(models: ModelOption[]): Record<string, string> {
+  const entries = models
+    .map((model) => {
+      const slash = model.value.indexOf("/");
+      const modelId = slash >= 0 ? model.value.slice(slash + 1) : model.value;
+      return modelId.trim() ? [modelId, modelId] : null;
+    })
+    .filter((entry): entry is [string, string] => Array.isArray(entry));
+  return Object.fromEntries(entries);
+}
+
+export async function discoverOpenAiCompatibleModels(
+  providerId: string,
+  baseURL: string,
+  apiKey?: string,
+  fetchImpl: FetchLike = fetch,
+): Promise<ModelOption[]> {
+  const url = buildOpenAiCompatibleModelsUrl(baseURL);
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+  };
+  const token = apiKey?.trim();
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const response = await fetchImpl(url, {
+    method: "GET",
+    headers,
+  });
+
+  if (!response.ok) {
+    let detail = "";
+    try {
+      const body = await response.json() as { error?: { message?: string } | string; message?: string };
+      detail = typeof body.error === "string"
+        ? body.error
+        : body.error?.message || body.message || "";
+    } catch {
+      detail = await response.text().catch(() => "");
+    }
+    throw new Error(detail || `models endpoint returned HTTP ${response.status}`);
+  }
+
+  const payload = await response.json() as { data?: Array<{ id?: unknown } | string> };
+  const ids = Array.from(new Set((payload.data || [])
+    .map((entry) => {
+      if (typeof entry === "string") return entry.trim();
+      return typeof entry?.id === "string" ? entry.id.trim() : "";
+    })
+    .filter(Boolean)));
+
+  if (ids.length === 0) {
+    throw new Error("compatible endpoint returned no models");
+  }
+
+  return toModelOptions(providerId, ids);
+}
+
+async function listDraftProviderModels(baseDir: string, providerId: string, options?: { apiKey?: string; baseURL?: string }): Promise<ModelOption[]> {
+  const session = await createSession({
+    model: "openai:gpt-4o",
+    cwd: baseDir,
+    providers: options && (options.apiKey?.trim() || options.baseURL?.trim())
+      ? {
+          [providerId]: {
+            id: providerId,
+            options: {
+              ...(options.apiKey?.trim() ? { apiKey: options.apiKey.trim() } : {}),
+              ...(options.baseURL?.trim() ? { baseURL: options.baseURL.trim() } : {}),
+            },
+          },
+        }
+      : {},
+  });
+
+  try {
+    const bus = (session as any).messageBus;
+    const mRes = await bus.request("models.list", { cwd: baseDir });
+    if (!mRes.success) throw new Error(mRes.error || "models.list failed");
+    const group = (mRes.data?.groupedModels || []).find((g: any) => g.provider === providerId || g.providerId === providerId);
+    const result = group?.models || [];
+    return result.map((x: any) => ({ label: x.name || x.id, value: x.value || x.id }));
+  } finally {
+    await session.close();
+  }
 }
 
 function maskConfig(config: Config): Config {
@@ -813,15 +919,30 @@ export async function handleWebCommand(opts: WebOptions): Promise<void> {
           try {
             if (body.mode === "custom") {
               const cp = body.customProvider as any;
-              sendJson(res, 200, { models: [{ label: cp.name || cp.id, value: cp.id }] });
+              const providerId = typeof cp?.id === "string" ? cp.id.trim() : "";
+              const baseURL = typeof cp?.options?.baseURL === "string" ? cp.options.baseURL.trim() : "";
+              const apiKey = typeof cp?.options?.apiKey === "string" ? cp.options.apiKey : undefined;
+              if (!providerId) throw new Error("custom provider id required");
+              if (!baseURL) throw new Error("custom provider baseURL required");
+              const models = await discoverOpenAiCompatibleModels(providerId, baseURL, apiKey);
+              sendJson(res, 200, {
+                models,
+                provider: {
+                  ...cp,
+                  id: providerId,
+                  options: {
+                    ...(apiKey?.trim() ? { apiKey: apiKey.trim() } : {}),
+                    baseURL,
+                  },
+                  models: toCustomProviderModelsMap(models),
+                },
+              });
             } else {
               const pid = body.providerId as string;
-              const bus = await getHeadlessBus(opts.baseDir);
-              const mRes = await bus.request("models.list", { cwd: opts.baseDir });
-              if (!mRes.success) throw new Error(mRes.error || "models.list failed");
-              const group = (mRes.data?.groupedModels || []).find((g: any) => g.provider === pid || g.providerId === pid);
-              const result = group?.models || [];
-              sendJson(res, 200, { models: result.map((x: any) => ({ label: x.name || x.id, value: x.value || x.id })) });
+              const apiKey = typeof body.apiKey === "string" ? body.apiKey : undefined;
+              const baseURL = typeof body.baseURL === "string" ? body.baseURL : undefined;
+              const models = await listDraftProviderModels(opts.baseDir, pid, { apiKey, baseURL });
+              sendJson(res, 200, { models });
             }
           } catch (e: any) {
             sendJson(res, 500, { error: e.message || String(e) });

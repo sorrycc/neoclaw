@@ -276,6 +276,16 @@ export default function App() {
       const res = await api('/api/providers/models', payload);
       setModels(res.models || []);
 
+      if (selectedProvider.id === 'custom' && res.provider) {
+        setConfigDraft((prev: any) => ({
+          ...prev,
+          providers: {
+            ...prev.providers,
+            [res.provider.id]: res.provider,
+          },
+        }));
+      }
+
       if (res.models && res.models.length > 0) {
         setConfigDraft((prev: any) => ({
           ...prev,
