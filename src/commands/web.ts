@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "http";
+import { spawnSync } from "child_process";
 import { randomBytes, timingSafeEqual } from "crypto";
 import {
   existsSync,
@@ -37,6 +38,8 @@ type WebOptions = {
 };
 
 type JsonBody = Record<string, unknown>;
+type CommandRunnerResult = { status: number | null; error?: Error };
+type CommandRunner = (cmd: string, args: string[], cwd: string) => CommandRunnerResult;
 
 type RateState = { count: number; resetAt: number };
 
@@ -190,6 +193,41 @@ function resolveWebDistDir(): string | null {
     if (existsSync(index)) return candidate;
   }
   return null;
+}
+
+function defaultCommandRunner(cmd: string, args: string[], cwd: string): CommandRunnerResult {
+  const result = spawnSync(cmd, args, {
+    cwd,
+    env: process.env,
+    stdio: "inherit",
+  });
+  return {
+    status: result.status,
+    error: result.error,
+  };
+}
+
+export function ensureWebUiBuilt(runner: CommandRunner = defaultCommandRunner): string {
+  const distDir = resolveWebDistDir();
+  if (distDir) return distDir;
+
+  logger.info("web", "web ui not found, running `bun run build:web`");
+  const result = runner("bun", ["run", "build:web"], PROJECT_ROOT);
+
+  if (result.error) {
+    throw new Error(`Failed to build Web UI: ${result.error.message}`);
+  }
+
+  if (result.status !== 0) {
+    throw new Error(`Failed to build Web UI: \`bun run build:web\` exited with code ${result.status ?? "unknown"}`);
+  }
+
+  const builtDistDir = resolveWebDistDir();
+  if (!builtDistDir) {
+    throw new Error("Failed to build Web UI: build completed but index.html is still missing");
+  }
+
+  return builtDistDir;
 }
 
 function safeResolveInDist(distRoot: string, pathname: string): string | null {
@@ -521,6 +559,7 @@ export async function handleWebCommand(opts: WebOptions): Promise<void> {
   const csrfToken = randomBytes(18).toString("base64url");
 
   mkdirSync(opts.baseDir, { recursive: true });
+  const distDir = ensureWebUiBuilt();
 
   const authLimiter = createRateLimiter(30, 60_000);
   const apiLimiter = createRateLimiter(300, 60_000);
@@ -546,11 +585,6 @@ export async function handleWebCommand(opts: WebOptions): Promise<void> {
           sendJson(res, 429, { error: "Too many requests" });
           return;
         }
-        const distDir = resolveWebDistDir();
-        if (!distDir) {
-          sendHtml(res, "Web UI not built. Please run `bun run build:web`.");
-          return;
-        }
         const indexHtmlPath = join(distDir, "index.html");
         try {
           const indexHtml = readFileSync(indexHtmlPath, "utf-8");
@@ -563,11 +597,6 @@ export async function handleWebCommand(opts: WebOptions): Promise<void> {
 
       // Serve static assets for the React App
       if (!url.pathname.startsWith("/api/") && !url.pathname.startsWith("/auth/") && method === "GET") {
-        const distDir = resolveWebDistDir();
-        if (!distDir) {
-          sendJson(res, 503, { error: "Web UI not built. Run `bun run build:web` first." });
-          return;
-        }
         const resolvedPath = safeResolveInDist(distDir, url.pathname);
         if (!resolvedPath) {
           sendJson(res, 404, { error: "Not found" });

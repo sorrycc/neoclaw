@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "fs";
-import { join } from "path";
+import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "fs";
+import { dirname, join } from "path";
 import type { Config } from "../../config/schema.js";
 import {
   createConfigSnapshot,
+  ensureWebUiBuilt,
   hasConfigFile,
   listConfigSnapshots,
   parseWebHost,
@@ -12,12 +13,31 @@ import {
 } from "../web.js";
 
 const tmpDirs: string[] = [];
+const cleanupFns: Array<() => void> = [];
 
 afterEach(() => {
+  while (cleanupFns.length > 0) cleanupFns.pop()?.();
   for (const dir of tmpDirs.splice(0, tmpDirs.length)) {
     if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
   }
 });
+
+function backupPath(target: string): string | null {
+  if (!existsSync(target)) return null;
+  const backup = `${target}.bak-test-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  renameSync(target, backup);
+  cleanupFns.push(() => {
+    if (existsSync(target)) rmSync(target, { recursive: true, force: true });
+    renameSync(backup, target);
+  });
+  return backup;
+}
+
+function cleanupCreatedPath(target: string): void {
+  cleanupFns.push(() => {
+    if (existsSync(target)) rmSync(target, { recursive: true, force: true });
+  });
+}
 
 describe("web command helpers", () => {
   it("parses host with default fallback", () => {
@@ -66,5 +86,51 @@ describe("web command helpers", () => {
     expect(all.length).toBeGreaterThan(0);
     const read = readSnapshotConfig(baseDir, s1.id);
     expect(read.channels.feishu.appId).toBe("cli_1");
+  });
+
+  it("reuses existing web dist without rebuilding", () => {
+    const repoRoot = process.cwd();
+    const webappDist = join(repoRoot, "webapp", "dist");
+    const indexPath = join(webappDist, "index.html");
+    const distWeb = join(repoRoot, "dist", "web");
+
+    backupPath(webappDist);
+    backupPath(distWeb);
+    mkdirSync(webappDist, { recursive: true });
+    writeFileSync(indexPath, "<html>ok</html>", "utf-8");
+    cleanupCreatedPath(webappDist);
+
+    let calls = 0;
+    const resolved = ensureWebUiBuilt(() => {
+      calls += 1;
+      return { status: 0 };
+    });
+
+    expect(calls).toBe(0);
+    expect(resolved).toBe(webappDist);
+  });
+
+  it("builds web dist automatically when missing", () => {
+    const repoRoot = process.cwd();
+    const webappDist = join(repoRoot, "webapp", "dist");
+    const distWeb = join(repoRoot, "dist", "web");
+    const builtIndex = join(distWeb, "index.html");
+
+    backupPath(webappDist);
+    backupPath(distWeb);
+    cleanupCreatedPath(webappDist);
+    cleanupCreatedPath(distWeb);
+
+    let calls = 0;
+    const resolved = ensureWebUiBuilt((_cmd, _args, cwd) => {
+      calls += 1;
+      expect(cwd).toBe(repoRoot);
+      mkdirSync(dirname(builtIndex), { recursive: true });
+      writeFileSync(builtIndex, "<html>built</html>", "utf-8");
+      return { status: 0 };
+    });
+
+    expect(calls).toBe(1);
+    expect(resolved).toBe(distWeb);
   });
 });
