@@ -16,6 +16,12 @@ type SaveConfigResult = {
   startCommand?: string;
 };
 
+type RuntimeStatusResponse = {
+  agent?: {
+    running?: boolean;
+  };
+};
+
 const CUSTOM_API_FORMATS: CustomApiFormat[] = ['openai', 'responses', 'anthropic', 'google'];
 
 export default function App() {
@@ -70,6 +76,7 @@ export default function App() {
   const [autoStartState, setAutoStartState] = useState<AutoStartState | null>(null);
   const [startCommand, setStartCommand] = useState('neoclaw');
   const [isStartingAgent, setIsStartingAgent] = useState(false);
+  const [agentRunning, setAgentRunning] = useState(false);
 
   useEffect(() => {
     document.documentElement.lang = locale === 'zh' ? 'zh-CN' : 'en';
@@ -153,9 +160,15 @@ export default function App() {
     }
   };
 
+  const refreshRuntimeStatus = async () => {
+    const runtime = await api<RuntimeStatusResponse>('/api/runtime-status');
+    setAgentRunning(!!runtime.agent?.running);
+  };
+
   const checkContext = async () => {
     try {
       const { config } = await api('/api/config/current');
+      await refreshRuntimeStatus();
 
       setConfigDraft((prev: any) => ({
         ...prev,
@@ -338,6 +351,7 @@ export default function App() {
       const res = await api<SaveConfigResult>('/api/config/save', configDraft);
       setAutoStartState(null);
       setStartCommand(res.startCommand || 'neoclaw');
+      await refreshRuntimeStatus();
       setStep(4);
     } catch (err: any) {
       let msg = err.message;
@@ -356,6 +370,7 @@ export default function App() {
       const res = await api<AutoStartState>('/api/agent/start', {});
       setAutoStartState(res);
       if (res.command) setStartCommand(res.command);
+      if (res.started || res.alreadyStarted) setAgentRunning(true);
     } catch (err: any) {
       setAutoStartState({ enabled: true, started: false, command: startCommand, error: err.message });
     } finally {
@@ -364,14 +379,14 @@ export default function App() {
   };
 
   const resolvedStartCommand = autoStartState?.command || startCommand || 'neoclaw';
-  const autoStarted = !!autoStartState?.started || !!autoStartState?.alreadyStarted;
+  const autoStarted = agentRunning || !!autoStartState?.started || !!autoStartState?.alreadyStarted;
   const startHint = autoStartState
     ? autoStarted
       ? autoStartState.alreadyStarted
         ? t('autoStartAlreadyHint')
         : t('autoStartSuccessHint')
       : t('autoStartFailedHint')
-    : t('clickStartHint');
+    : agentRunning ? t('autoStartAlreadyHint') : t('clickStartHint');
 
   if (loading && !needsLogin && step === 1 && providers.length === 0) {
     return (

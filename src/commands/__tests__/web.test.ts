@@ -340,12 +340,7 @@ describe("web command helpers", () => {
     });
   });
 
-  it("starts only once per baseDir when auto-start is enabled", async () => {
-    const launches: Array<{ cmd: string; args: string[]; cwd: string }> = [];
-    const launcher = (cmd: string, args: string[], cwd: string) => {
-      launches.push({ cmd, args, cwd });
-      return { pid: 4321 };
-    };
+  it("requests transition into the main agent when not already running", async () => {
     const baseDir = join("/tmp", `neoclaw-auto-start-${Date.now()}-${Math.random().toString(16).slice(2)}`);
 
     const first = await triggerAutoStart(baseDir, {
@@ -353,36 +348,16 @@ describe("web command helpers", () => {
       startArgs: ["--profile", "demo"],
       cwd: "/tmp/neoclaw-shell",
       useBunRuntime: false,
-      launcher,
-    });
-    const second = await triggerAutoStart(baseDir, {
-      enabled: true,
-      startArgs: ["--profile", "demo"],
-      cwd: "/tmp/neoclaw-shell",
-      useBunRuntime: false,
-      launcher,
     });
 
-    expect(launches).toEqual([
-      { cmd: "neoclaw", args: ["--profile", "demo"], cwd: "/tmp/neoclaw-shell" },
-    ]);
     expect(first).toMatchObject({
       enabled: true,
       started: true,
       command: "neoclaw --profile demo",
-      pid: 4321,
-    });
-    expect(second).toMatchObject({
-      enabled: true,
-      started: false,
-      alreadyStarted: true,
-      command: "neoclaw --profile demo",
-      pid: 4321,
     });
   });
 
   it("does not start again when runtime status says agent is already running", async () => {
-    const launches: Array<{ cmd: string; args: string[]; cwd: string }> = [];
     const baseDir = join("/tmp", `neoclaw-runtime-running-${Date.now()}-${Math.random().toString(16).slice(2)}`);
     tmpDirs.push(baseDir);
     mkdirSync(baseDir, { recursive: true });
@@ -403,13 +378,8 @@ describe("web command helpers", () => {
       startArgs: ["--dev"],
       cwd: "/tmp/neoclaw-shell",
       useBunRuntime: false,
-      launcher: (cmd, args, cwd) => {
-        launches.push({ cmd, args, cwd });
-        return { pid: 6789 };
-      },
     });
 
-    expect(launches).toEqual([]);
     expect(result).toMatchObject({
       enabled: true,
       started: false,

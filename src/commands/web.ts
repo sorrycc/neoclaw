@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "http";
-import { spawn, spawnSync } from "child_process";
+import { spawnSync } from "child_process";
 import { randomBytes, timingSafeEqual } from "crypto";
 import {
   existsSync,
@@ -44,7 +44,6 @@ type WebAutoStartOptions = {
   cwd?: string;
   projectRoot?: string;
   useBunRuntime?: boolean;
-  launcher?: DetachedProcessLauncher;
 };
 
 type JsonBody = Record<string, unknown>;
@@ -60,7 +59,6 @@ type RateState = { count: number; resetAt: number };
 type ModelOption = { label: string; value: string };
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 type CustomApiFormat = "openai" | "responses" | "anthropic" | "google";
-type DetachedProcessLauncher = (cmd: string, args: string[], cwd: string) => Promise<{ pid?: number }> | { pid?: number };
 
 export type AutoStartCommand = {
   mode: "bun" | "neoclaw";
@@ -87,11 +85,14 @@ export type ConfigSaveResult = {
   config: Config;
 };
 
+export type WebCommandResult = {
+  startAgent: boolean;
+};
+
 const BODY_LIMIT = 1024 * 1024;
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(MODULE_DIR, "../..");
 const SNAPSHOT_MAX_FILES = 30;
-const AUTO_STARTED_AGENTS = new Map<string, { pid?: number; command: string; mode: "bun" | "neoclaw" }>();
 
 export interface ConfigSnapshotMeta {
   id: string;
@@ -275,23 +276,6 @@ function quoteShellArg(arg: string): string {
   return /[^A-Za-z0-9_./:-]/.test(arg) ? JSON.stringify(arg) : arg;
 }
 
-function defaultDetachedProcessLauncher(cmd: string, args: string[], cwd: string): Promise<{ pid?: number }> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, {
-      cwd,
-      env: process.env,
-      stdio: "ignore",
-      detached: true,
-    });
-
-    child.once("error", reject);
-    child.once("spawn", () => {
-      child.unref();
-      resolve({ pid: child.pid });
-    });
-  });
-}
-
 function isPidRunning(pid: number | null | undefined): boolean {
   if (!pid || !Number.isInteger(pid) || pid <= 0) return false;
   try {
@@ -363,41 +347,12 @@ export async function triggerAutoStart(
     };
   }
 
-  const existing = AUTO_STARTED_AGENTS.get(baseDir);
-  if (existing) {
-    return {
-      enabled: true,
-      started: false,
-      alreadyStarted: true,
-      command: existing.command,
-      mode: existing.mode,
-      pid: existing.pid,
-    };
-  }
-
-  try {
-    const launched = await (options.launcher ?? defaultDetachedProcessLauncher)(command.cmd, command.args, command.cwd);
-    AUTO_STARTED_AGENTS.set(baseDir, {
-      pid: launched.pid,
-      command: command.display,
-      mode: command.mode,
-    });
-    return {
-      enabled: true,
-      started: true,
-      command: command.display,
-      mode: command.mode,
-      pid: launched.pid,
-    };
-  } catch (error) {
-    return {
-      enabled: true,
-      started: false,
-      command: command.display,
-      mode: command.mode,
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
+  return {
+    enabled: true,
+    started: true,
+    command: command.display,
+    mode: command.mode,
+  };
 }
 
 export function ensureWebUiBuilt(options: EnsureWebUiBuiltOptions = {}): string {
@@ -906,11 +861,21 @@ function isStateChanging(req: IncomingMessage): boolean {
   return req.method === "POST" || req.method === "PUT" || req.method === "PATCH" || req.method === "DELETE";
 }
 
-export async function handleWebCommand(opts: WebOptions): Promise<void> {
+export async function handleWebCommand(opts: WebOptions): Promise<WebCommandResult> {
   const host = opts.host || "127.0.0.1";
   const port = opts.port || 3180;
   const accessToken = opts.token || process.env.NEOCLAW_WEB_TOKEN || randomBytes(18).toString("base64url");
   const csrfToken = randomBytes(18).toString("base64url");
+  let startAgent = false;
+  let closing = false;
+  let resolveClosed: (() => void) | null = null;
+  let server: ReturnType<typeof createServer>;
+
+  const requestClose = () => {
+    if (closing) return;
+    closing = true;
+    server.close(() => resolveClosed?.());
+  };
 
   mkdirSync(opts.baseDir, { recursive: true });
   const distDir = ensureWebUiBuilt();
@@ -918,7 +883,7 @@ export async function handleWebCommand(opts: WebOptions): Promise<void> {
   const authLimiter = createRateLimiter(30, 60_000);
   const apiLimiter = createRateLimiter(300, 60_000);
 
-  const server = createServer(async (req, res) => {
+  server = createServer(async (req, res) => {
     try {
       const method = req.method || "GET";
       const url = new URL(req.url || "/", `http://${req.headers.host || `${host}:${port}`}`);
@@ -1212,6 +1177,10 @@ export async function handleWebCommand(opts: WebOptions): Promise<void> {
         if (url.pathname === "/api/agent/start" && method === "POST") {
           const started = await triggerAutoStart(opts.baseDir, opts.autoStart);
           sendJson(res, started.error ? 500 : 200, started);
+          if (started.started && !started.alreadyStarted) {
+            startAgent = true;
+            setImmediate(requestClose);
+          }
           return;
         }
 
@@ -1252,12 +1221,13 @@ export async function handleWebCommand(opts: WebOptions): Promise<void> {
   logger.info("web", `use header: Authorization: Bearer <token>`);
 
   await new Promise<void>((resolve) => {
-    const close = () => {
-      server.close(() => resolve());
-    };
+    resolveClosed = resolve;
+    const close = () => requestClose();
     process.on("SIGINT", close);
     process.on("SIGTERM", close);
   });
+
+  return { startAgent };
 }
 
 export function parseWebHost(value: unknown): string {
