@@ -380,4 +380,42 @@ describe("web command helpers", () => {
       pid: 4321,
     });
   });
+
+  it("does not start again when runtime status says agent is already running", async () => {
+    const launches: Array<{ cmd: string; args: string[]; cwd: string }> = [];
+    const baseDir = join("/tmp", `neoclaw-runtime-running-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    tmpDirs.push(baseDir);
+    mkdirSync(baseDir, { recursive: true });
+    writeFileSync(join(baseDir, "runtime-status.json"), JSON.stringify({
+      updatedAt: new Date().toISOString(),
+      agent: {
+        running: true,
+        pid: process.pid,
+        startedAt: new Date().toISOString(),
+        profileDir: baseDir,
+      },
+      channels: {},
+      recentErrors: [],
+    }), "utf-8");
+
+    const result = await triggerAutoStart(baseDir, {
+      enabled: true,
+      startArgs: ["--dev"],
+      cwd: "/tmp/neoclaw-shell",
+      useBunRuntime: false,
+      launcher: (cmd, args, cwd) => {
+        launches.push({ cmd, args, cwd });
+        return { pid: 6789 };
+      },
+    });
+
+    expect(launches).toEqual([]);
+    expect(result).toMatchObject({
+      enabled: true,
+      started: false,
+      alreadyStarted: true,
+      command: "neoclaw --dev",
+      pid: process.pid,
+    });
+  });
 });

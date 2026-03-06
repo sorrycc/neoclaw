@@ -101,7 +101,7 @@ export async function handleOnboardCommand(opts: OnboardOptions): Promise<string
     lines.push("Next steps:");
     if (mode === "web") {
       lines.push("  1. Complete setup in the Web Configuration UI");
-      lines.push("  2. After saving, neoclaw will auto-start using the same runtime");
+      lines.push("  2. After saving, click Start Agent in the Web UI");
     } else {
       lines.push("  1. Edit config at " + cfgPath);
       lines.push(`  2. Run: neoclaw${profileFlag}`);

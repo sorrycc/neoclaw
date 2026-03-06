@@ -206,9 +206,14 @@ async function main(): Promise<void> {
   }
 
   if (subcommand === "web") {
+    const profileArgs = resolveProfileArgs(argv);
     await handleWebCommand({
       baseDir,
       ...resolveWebOptions(argv),
+      autoStart: {
+        enabled: true,
+        startArgs: profileArgs,
+      },
     });
     process.exit(0);
   }

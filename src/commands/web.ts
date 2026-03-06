@@ -80,6 +80,13 @@ export type AutoStartResult = {
   error?: string;
 };
 
+export type ConfigSaveResult = {
+  ok: boolean;
+  warning: string;
+  startCommand?: string;
+  config: Config;
+};
+
 const BODY_LIMIT = 1024 * 1024;
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(MODULE_DIR, "../..");
@@ -285,6 +292,23 @@ function defaultDetachedProcessLauncher(cmd: string, args: string[], cwd: string
   });
 }
 
+function isPidRunning(pid: number | null | undefined): boolean {
+  if (!pid || !Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error: any) {
+    return error?.code === "EPERM";
+  }
+}
+
+function readActiveAgentPid(baseDir: string): number | undefined {
+  const snapshot = readRuntimeStatusSnapshot(baseDir);
+  const pid = snapshot.agent.pid;
+  if (!snapshot.agent.running || !isPidRunning(pid)) return undefined;
+  return pid ?? undefined;
+}
+
 export function resolveAutoStartCommand(options: {
   startArgs?: string[];
   cwd?: string;
@@ -320,6 +344,25 @@ export async function triggerAutoStart(
 ) : Promise<AutoStartResult> {
   if (!options?.enabled) return { enabled: false, started: false };
 
+  const command = resolveAutoStartCommand({
+    startArgs: options.startArgs,
+    cwd: options.cwd,
+    projectRoot: options.projectRoot,
+    useBunRuntime: options.useBunRuntime,
+  });
+
+  const activePid = readActiveAgentPid(baseDir);
+  if (activePid) {
+    return {
+      enabled: true,
+      started: false,
+      alreadyStarted: true,
+      command: command.display,
+      mode: command.mode,
+      pid: activePid,
+    };
+  }
+
   const existing = AUTO_STARTED_AGENTS.get(baseDir);
   if (existing) {
     return {
@@ -331,13 +374,6 @@ export async function triggerAutoStart(
       pid: existing.pid,
     };
   }
-
-  const command = resolveAutoStartCommand({
-    startArgs: options.startArgs,
-    cwd: options.cwd,
-    projectRoot: options.projectRoot,
-    useBunRuntime: options.useBunRuntime,
-  });
 
   try {
     const launched = await (options.launcher ?? defaultDetachedProcessLauncher)(command.cmd, command.args, command.cwd);
@@ -1156,17 +1192,26 @@ export async function handleWebCommand(opts: WebOptions): Promise<void> {
           }
 
           writeFileSync(configPath(opts.baseDir), JSON.stringify(incoming, null, 2), "utf-8");
-          const autoStart = await triggerAutoStart(opts.baseDir, opts.autoStart);
+          const startCommand = opts.autoStart?.enabled
+            ? resolveAutoStartCommand({
+                startArgs: opts.autoStart.startArgs,
+                cwd: opts.autoStart.cwd,
+                projectRoot: opts.autoStart.projectRoot,
+                useBunRuntime: opts.autoStart.useBunRuntime,
+              }).display
+            : undefined;
           sendJson(res, 200, {
             ok: true,
-            warning: autoStart.enabled
-              ? autoStart.started || autoStart.alreadyStarted
-                ? "配置已写入，主进程已自动启动。"
-                : "配置已写入，但自动启动失败。若稍后手动启动，watcher 仍会自动热更新。"
-              : "配置已写入。若正在运行 neoclaw 主进程，watcher 将自动热更新。",
-            autoStart,
+            warning: "配置已写入。启动 Agent 前，可先在当前页面测试模型连通性。",
+            startCommand,
             config: maskConfig(loadConfig(opts.baseDir)),
-          });
+          } satisfies ConfigSaveResult);
+          return;
+        }
+
+        if (url.pathname === "/api/agent/start" && method === "POST") {
+          const started = await triggerAutoStart(opts.baseDir, opts.autoStart);
+          sendJson(res, started.error ? 500 : 200, started);
           return;
         }
 

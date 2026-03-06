@@ -12,6 +12,10 @@ type AutoStartState = {
   error?: string;
 };
 
+type SaveConfigResult = {
+  startCommand?: string;
+};
+
 const CUSTOM_API_FORMATS: CustomApiFormat[] = ['openai', 'responses', 'anthropic', 'google'];
 
 export default function App() {
@@ -64,6 +68,8 @@ export default function App() {
   const [chatLog, setChatLog] = useState<{ role: 'user' | 'agent', content: string }[]>([]);
   const [isChatting, setIsChatting] = useState(false);
   const [autoStartState, setAutoStartState] = useState<AutoStartState | null>(null);
+  const [startCommand, setStartCommand] = useState('neoclaw');
+  const [isStartingAgent, setIsStartingAgent] = useState(false);
 
   useEffect(() => {
     document.documentElement.lang = locale === 'zh' ? 'zh-CN' : 'en';
@@ -329,8 +335,9 @@ export default function App() {
   const saveConfig = async () => {
     try {
       setLoading(true);
-      const res = await api<{ autoStart?: AutoStartState }>('/api/config/save', configDraft);
-      setAutoStartState(res.autoStart || null);
+      const res = await api<SaveConfigResult>('/api/config/save', configDraft);
+      setAutoStartState(null);
+      setStartCommand(res.startCommand || 'neoclaw');
       setStep(4);
     } catch (err: any) {
       let msg = err.message;
@@ -343,15 +350,28 @@ export default function App() {
     }
   };
 
-  const resolvedStartCommand = autoStartState?.command || 'neoclaw';
+  const startAgent = async () => {
+    try {
+      setIsStartingAgent(true);
+      const res = await api<AutoStartState>('/api/agent/start', {});
+      setAutoStartState(res);
+      if (res.command) setStartCommand(res.command);
+    } catch (err: any) {
+      setAutoStartState({ enabled: true, started: false, command: startCommand, error: err.message });
+    } finally {
+      setIsStartingAgent(false);
+    }
+  };
+
+  const resolvedStartCommand = autoStartState?.command || startCommand || 'neoclaw';
   const autoStarted = !!autoStartState?.started || !!autoStartState?.alreadyStarted;
-  const startHint = autoStarted
-    ? autoStartState?.alreadyStarted
-      ? t('autoStartAlreadyHint')
-      : t('autoStartSuccessHint')
-    : autoStartState?.enabled
-      ? t('autoStartFailedHint')
-      : t('whatsNextHint');
+  const startHint = autoStartState
+    ? autoStarted
+      ? autoStartState.alreadyStarted
+        ? t('autoStartAlreadyHint')
+        : t('autoStartSuccessHint')
+      : t('autoStartFailedHint')
+    : t('clickStartHint');
 
   if (loading && !needsLogin && step === 1 && providers.length === 0) {
     return (
@@ -742,10 +762,15 @@ export default function App() {
               <div style={{ background: '#1e293b', color: '#f8fafc', padding: '1rem', borderRadius: 8, fontFamily: 'monospace', fontSize: '1.1rem', marginBottom: '1rem' }}>
                 {resolvedStartCommand}
               </div>
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1rem' }}>
+                <button className="btn btn-primary" onClick={startAgent} disabled={isStartingAgent || autoStarted}>
+                  {autoStarted ? t('agentStartedButton') : isStartingAgent ? t('startingAgentButton') : t('startAgentButton')}
+                </button>
+              </div>
               {autoStarted ? (
                 <p style={{ color: '#475569', fontSize: '0.9rem' }}>{t('autoStartSuccessSubtitle')}</p>
               ) : (
-                <p style={{ color: '#475569', fontSize: '0.9rem' }}>{t('bunHintPrefix')} <code>bun run start</code></p>
+                <p style={{ color: '#475569', fontSize: '0.9rem' }}>{t('startCommandHint')}</p>
               )}
               {autoStartState?.error && (
                 <p style={{ color: '#b91c1c', fontSize: '0.9rem', marginTop: '0.75rem' }}>
