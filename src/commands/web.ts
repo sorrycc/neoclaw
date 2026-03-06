@@ -241,10 +241,11 @@ export function ensureWebUiBuilt(options: EnsureWebUiBuiltOptions = {}): string 
   } = options;
 
   const distDir = resolveWebDistDir(projectRoot, cwd);
-  if (distDir) return distDir;
-
   const webappRoot = resolve(projectRoot, "webapp");
-  if (!existsSync(join(webappRoot, "package.json"))) {
+  const hasWebappSource = existsSync(join(webappRoot, "package.json"));
+
+  if (!hasWebappSource) {
+    if (distDir) return distDir;
     throw new Error(`Failed to build Web UI: webapp package not found at ${webappRoot}`);
   }
 
@@ -254,7 +255,9 @@ export function ensureWebUiBuilt(options: EnsureWebUiBuiltOptions = {}): string 
     assertCommandSucceeded("`bun install` in webapp", installResult);
   }
 
-  logger.info("web", "web ui not found, running `bun run build:web`");
+  logger.info("web", distDir
+    ? "rebuilding web ui on startup to pick up frontend changes"
+    : "web ui not found, running `bun run build:web`");
   const result = runner("bun", ["run", "build:web"], projectRoot);
   assertCommandSucceeded("`bun run build:web`", result);
 
