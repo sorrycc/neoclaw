@@ -1,6 +1,6 @@
 # Neoclaw
 
-Multi-channel AI agent with CLI and Telegram support.
+Multi-channel AI agent with CLI, Telegram, DingTalk, and experimental Feishu support.
 
 ## Architecture
 

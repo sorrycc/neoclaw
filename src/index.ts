@@ -17,6 +17,9 @@ import { HeartbeatService } from "./services/heartbeat.js";
 import { handleCronCommand } from "./commands/cron.js";
 import { handleStatusCommand } from "./commands/status.js";
 import { handleOnboardCommand } from "./commands/onboard.js";
+import { handleWebCommand, parseWebHost, parseWebPort } from "./commands/web.js";
+import { RuntimeStatusStore } from "./runtime/status-store.js";
+let activeStatusStore: RuntimeStatusStore | null = null;
 
 function showHelp(): void {
   console.log(`neoclaw v${pkg.version} - A multi-channel AI agent
@@ -28,11 +31,17 @@ Commands:
   status       Show agent status and cron jobs
   onboard      Initialize workspace and configuration
   cron         Manage scheduled tasks
+  web          Open web config panel
   help         Show this help message
 
 Options:
   --profile <name>  Use a named profile (~/.neoclaw-<name>)
   --dev             Use dev profile (~/.neoclaw-dev)
+  --mode <mode>     Onboard mode (for onboard command): default|web
+  --host <host>     Bind host for web command (default: 127.0.0.1)
+  --port <port>     Bind port for web command (default: 8788)
+  --token <token>   Web auth token (for web / onboard --mode web)
+  -y, --yes         Auto-confirm prompts (for onboard command)
   -h, --help        Show this help message
   -v, --version     Print version and exit`);
 }
@@ -56,15 +65,45 @@ function resolveBaseDir(argv: yargsParser.Arguments): string {
     : join(homedir(), ".neoclaw");
 }
 
+function resolveOnboardMode(argv: yargsParser.Arguments): "default" | "web" {
+  const raw = argv.mode;
+  if (raw === undefined) return "default";
+  if (typeof raw !== "string") {
+    console.error("Error: --mode requires a value (default|web)");
+    process.exit(1);
+  }
+
+  const mode = raw.trim().toLowerCase();
+  if (mode === "default" || mode === "file") return "default";
+  if (mode === "web") return "web";
+
+  console.error(`Error: invalid --mode "${raw}", expected default|web`);
+  process.exit(1);
+}
+
+function resolveWebOptions(argv: yargsParser.Arguments): { host: string; port: number; token?: string } {
+  return {
+    host: parseWebHost(argv.host),
+    port: parseWebPort(argv.port),
+    token: typeof argv.token === "string" ? argv.token : undefined,
+  };
+}
+
 const INTERRUPT_COMMANDS = new Set(["/stop"]);
 
-async function processMsg(bus: MessageBus, agent: NeovateAgent, msg: InboundMessage): Promise<void> {
+async function processMsg(
+  bus: MessageBus,
+  agent: NeovateAgent,
+  msg: InboundMessage,
+  statusStore?: RuntimeStatusStore,
+): Promise<void> {
   try {
     for await (const response of agent.processMessage(msg)) {
       bus.publishOutbound(response);
     }
   } catch (err) {
     logger.error("main", `error processing message, session=${sessionKey(msg)}:`, err);
+    statusStore?.pushError("main:process", err);
     bus.publishOutbound({
       channel: msg.channel,
       chatId: msg.chatId,
@@ -75,7 +114,7 @@ async function processMsg(bus: MessageBus, agent: NeovateAgent, msg: InboundMess
   }
 }
 
-async function mainLoop(bus: MessageBus, agent: NeovateAgent): Promise<void> {
+async function mainLoop(bus: MessageBus, agent: NeovateAgent, statusStore?: RuntimeStatusStore): Promise<void> {
   const running = new Map<string, Promise<void>>();
 
   while (true) {
@@ -84,10 +123,10 @@ async function mainLoop(bus: MessageBus, agent: NeovateAgent): Promise<void> {
     const key = sessionKey(msg);
 
     if (INTERRUPT_COMMANDS.has(msg.content)) {
-      processMsg(bus, agent, msg);
+      processMsg(bus, agent, msg, statusStore);
     } else {
       const prev = running.get(key) ?? Promise.resolve();
-      const next = prev.then(() => processMsg(bus, agent, msg));
+      const next = prev.then(() => processMsg(bus, agent, msg, statusStore));
       running.set(key, next);
       next.then(() => { if (running.get(key) === next) running.delete(key); });
     }
@@ -121,13 +160,23 @@ async function main(): Promise<void> {
 
   if (subcommand === "onboard") {
     const flag = argv.profile ? ` --profile ${argv.profile}` : argv.dev ? " --dev" : "";
+    const mode = resolveOnboardMode(argv);
     const result = await handleOnboardCommand({
       baseDir,
       pkgRoot: __pkgRoot,
       profileFlag: flag,
       force: !!(argv.yes || argv.y),
+      mode,
     });
     console.log(result);
+
+    if (mode === "web") {
+      await handleWebCommand({
+        baseDir,
+        ...resolveWebOptions(argv),
+      });
+    }
+
     process.exit(0);
   }
 
@@ -139,6 +188,14 @@ async function main(): Promise<void> {
     await cron.init();
     const args = argv._.slice(1).map(String);
     console.log(await handleCronCommand(cron, args));
+    process.exit(0);
+  }
+
+  if (subcommand === "web") {
+    await handleWebCommand({
+      baseDir,
+      ...resolveWebOptions(argv),
+    });
     process.exit(0);
   }
 
@@ -162,30 +219,45 @@ async function main(): Promise<void> {
   logger.info("neoclaw", `model: ${config.agent.model}`);
   logger.info("neoclaw", `workspace: ${config.agent.workspace}`);
 
+  const statusStore = new RuntimeStatusStore(baseDir);
+  activeStatusStore = statusStore;
+  statusStore.markAgentRunning();
+
   const bus = new MessageBus();
   const cron = new CronService(config.agent.workspace, bus);
   await cron.init();
   const agent = await NeovateAgent.create(config, cron, bus);
-  const channelManager = new ChannelManager(config, bus);
+  const channelManager = new ChannelManager(config, bus, statusStore);
   const heartbeat = new HeartbeatService(config.agent.workspace, bus);
 
   const configWatcher = watchConfig(baseDir, (newConfig) => {
     if (newConfig.logLevel) setLevel(newConfig.logLevel);
     agent.updateConfig(newConfig);
-    channelManager.updateConfig(newConfig);
+    void channelManager.updateConfig(newConfig).catch((err) => {
+      logger.error("neoclaw", "failed to dynamically update channels:", err);
+      statusStore.pushError("config:update", err);
+    });
   });
 
-  process.on("SIGINT", async () => {
+  let shuttingDown = false;
+  const shutdown = async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     logger.info("neoclaw", "shutting down...");
     configWatcher.close();
     await channelManager.stop();
     cron.stop();
     heartbeat.stop();
+    statusStore.markAgentStopped();
+    activeStatusStore = null;
     process.exit(0);
-  });
+  };
+
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
 
   await Promise.all([
-    mainLoop(bus, agent),
+    mainLoop(bus, agent, statusStore),
     channelManager.startAll(),
     cron.start(),
     heartbeat.start(),
@@ -193,6 +265,10 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
+  try {
+    activeStatusStore?.pushError("main:fatal", err);
+    activeStatusStore?.markAgentStopped();
+  } catch {}
   logger.error("neoclaw", "fatal:", err);
   process.exit(1);
 });
