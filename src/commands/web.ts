@@ -323,6 +323,8 @@ function maskConfig(config: Config): Config {
   if (clone.channels.telegram.token) clone.channels.telegram.token = "********";
   if (clone.channels.dingtalk.clientSecret) clone.channels.dingtalk.clientSecret = "********";
   if (clone.channels.feishu.appSecret) clone.channels.feishu.appSecret = "********";
+  if (clone.agent.memorySearch) delete clone.agent.memorySearch;
+  if (clone.agent.memoryFlush) delete clone.agent.memoryFlush;
   return clone;
 }
 
@@ -344,6 +346,9 @@ function normalizeIncomingConfig(body: JsonBody, baseDir: string): Config {
   const next = structuredClone(current);
 
   const agent = (body.agent ?? {}) as JsonBody;
+  const memorySearch = (agent.memorySearch ?? {}) as JsonBody;
+  const memoryEmbeddings = (memorySearch.embeddings ?? {}) as JsonBody;
+  const memoryFlush = (agent.memoryFlush ?? {}) as JsonBody;
   const channels = (body.channels ?? {}) as JsonBody;
   const telegram = (channels.telegram ?? {}) as JsonBody;
   const cli = (channels.cli ?? {}) as JsonBody;
@@ -357,6 +362,18 @@ function normalizeIncomingConfig(body: JsonBody, baseDir: string): Config {
   if (typeof agent.maxMemorySize === "number") next.agent.maxMemorySize = Math.max(1024, Math.floor(agent.maxMemorySize));
   if (typeof agent.consolidationTimeout === "number") next.agent.consolidationTimeout = Math.max(1000, Math.floor(agent.consolidationTimeout));
   if (typeof agent.subagentTimeout === "number") next.agent.subagentTimeout = Math.max(1000, Math.floor(agent.subagentTimeout));
+  if (typeof memorySearch.enabled === "boolean") next.agent.memorySearch = { ...next.agent.memorySearch, enabled: memorySearch.enabled };
+  if (memorySearch.provider === "fts" || memorySearch.provider === "hybrid") next.agent.memorySearch = { ...next.agent.memorySearch, provider: memorySearch.provider };
+  if (typeof memorySearch.maxResults === "number") next.agent.memorySearch = { ...next.agent.memorySearch, maxResults: Math.max(1, Math.floor(memorySearch.maxResults)) };
+  if (typeof memorySearch.minScore === "number") next.agent.memorySearch = { ...next.agent.memorySearch, minScore: memorySearch.minScore };
+  if (typeof memorySearch.indexPath === "string") next.agent.memorySearch = { ...next.agent.memorySearch, indexPath: memorySearch.indexPath.trim() };
+  if (typeof memorySearch.autoRecall === "boolean") next.agent.memorySearch = { ...next.agent.memorySearch, autoRecall: memorySearch.autoRecall };
+  if (typeof memorySearch.recencyHalfLifeDays === "number") next.agent.memorySearch = { ...next.agent.memorySearch, recencyHalfLifeDays: Math.max(1, Math.floor(memorySearch.recencyHalfLifeDays)) };
+  if (typeof memoryEmbeddings.enabled === "boolean") next.agent.memorySearch = { ...next.agent.memorySearch, embeddings: { ...next.agent.memorySearch?.embeddings, enabled: memoryEmbeddings.enabled } };
+  if (typeof memoryEmbeddings.model === "string") next.agent.memorySearch = { ...next.agent.memorySearch, embeddings: { ...next.agent.memorySearch?.embeddings, model: memoryEmbeddings.model.trim() } };
+  if (typeof memoryEmbeddings.dims === "number") next.agent.memorySearch = { ...next.agent.memorySearch, embeddings: { ...next.agent.memorySearch?.embeddings, dims: Math.max(1, Math.floor(memoryEmbeddings.dims)) } };
+  if (typeof memoryFlush.enabled === "boolean") next.agent.memoryFlush = { ...next.agent.memoryFlush, enabled: memoryFlush.enabled };
+  if (typeof memoryFlush.timeoutMs === "number") next.agent.memoryFlush = { ...next.agent.memoryFlush, timeoutMs: Math.max(1000, Math.floor(memoryFlush.timeoutMs)) };
 
   if (typeof telegram.enabled === "boolean") next.channels.telegram.enabled = telegram.enabled;
   if (typeof telegram.token === "string" && telegram.token.trim() && telegram.token.trim() !== "********") {
@@ -432,6 +449,9 @@ function validateConfig(config: Config): string[] {
   if (!config.agent.model) errs.push("agent.model 不能为空");
   if (!config.agent.workspace) errs.push("agent.workspace 不能为空");
   if (config.agent.memoryWindow < 1) errs.push("agent.memoryWindow 必须 >= 1");
+  if (config.agent.memorySearch?.maxResults !== undefined && config.agent.memorySearch.maxResults < 1) errs.push("agent.memorySearch.maxResults 必须 >= 1");
+  if (config.agent.memorySearch?.recencyHalfLifeDays !== undefined && config.agent.memorySearch.recencyHalfLifeDays < 1) errs.push("agent.memorySearch.recencyHalfLifeDays 必须 >= 1");
+  if (config.agent.memoryFlush?.timeoutMs !== undefined && config.agent.memoryFlush.timeoutMs < 1000) errs.push("agent.memoryFlush.timeoutMs 必须 >= 1000");
   if (config.channels.telegram.enabled && !config.channels.telegram.token) errs.push("Telegram 启用时必须设置 token");
   if (config.channels.dingtalk.enabled) {
     if (!config.channels.dingtalk.clientId) errs.push("DingTalk 启用时必须设置 clientId");

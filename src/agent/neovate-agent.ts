@@ -11,6 +11,8 @@ import { processStream } from "./stream-processor.js";
 import { SessionManager } from "../session/manager.js";
 import { MemoryManager } from "../memory/memory.js";
 import { ConsolidationService } from "../memory/consolidation.js";
+import { MemoryFlushService } from "../memory/flush.js";
+import { MemoryRetrievalService } from "../memory/retrieval.js";
 import type { ConversationEntry } from "../memory/types.js";
 import type { Config } from "../config/schema.js";
 import type { CronService } from "../services/cron.js";
@@ -19,6 +21,7 @@ import { createCronTool } from "./tools/cron.js";
 import { createSendFileTool } from "./tools/send-file.js";
 import { createCodeTool } from "./tools/code.js";
 import { createSpawnTool } from "./tools/spawn.js";
+import { createMemoryGetTool, createMemorySearchTool } from "./tools/memory.js";
 import { SubagentManager } from "../services/subagent.js";
 import type { MessageBus } from "../bus/message-bus.js";
 
@@ -30,6 +33,8 @@ export class NeovateAgent implements Agent {
   private sessionManager: SessionManager;
   private memoryManager: MemoryManager;
   private consolidationService: ConsolidationService;
+  private memoryFlushService: MemoryFlushService;
+  private memoryRetrieval: MemoryRetrievalService;
   private subagentManager: SubagentManager;
 
   private constructor(
@@ -38,8 +43,10 @@ export class NeovateAgent implements Agent {
     private bus: MessageBus,
     sessionManager: SessionManager,
     memoryManager: MemoryManager,
+    memoryRetrieval: MemoryRetrievalService,
   ) {
     this.memoryManager = memoryManager;
+    this.memoryRetrieval = memoryRetrieval;
     this.contextBuilder = new ContextBuilder(config.agent.workspace, this.memoryManager);
     this.skillManager = new SkillManager(config.agent.workspace);
     this.sessionManager = sessionManager;
@@ -49,13 +56,18 @@ export class NeovateAgent implements Agent {
       config.agent.model,
       config.agent.maxMemorySize ?? 8192,
     );
+    this.memoryFlushService = new MemoryFlushService(
+      (message, options) => prompt(message, options),
+      config.agent.model,
+    );
   }
 
   static async create(config: Config, cronService: CronService, bus: MessageBus): Promise<NeovateAgent> {
     const sessionsDir = join(config.agent.workspace, "..", "sessions");
     const sessionManager = await SessionManager.create(sessionsDir);
     const memoryManager = await MemoryManager.create(config.agent.workspace);
-    return new NeovateAgent(config, cronService, bus, sessionManager, memoryManager);
+    const memoryRetrieval = await MemoryRetrievalService.create(config.agent.workspace, config.agent.memorySearch);
+    return new NeovateAgent(config, cronService, bus, sessionManager, memoryManager, memoryRetrieval);
   }
 
   async *processMessage(msg: InboundMessage): AsyncGenerator<OutboundMessage> {
@@ -66,14 +78,11 @@ export class NeovateAgent implements Agent {
       channel: outChannel, chatId: outChatId, content, media: [], metadata: { progress },
     });
 
-    // Handle built-in commands
     const commandResult = yield* this.handleCommand(msg, key, reply);
     if (commandResult) return;
 
-    // Manage session window (consolidate + trim if needed)
     let sessionRecap = await this.manageSessionWindow(key);
 
-    // On cold restart: no SDK session but persisted messages exist — build recap
     if (!sessionRecap && !this.sessions.has(key)) {
       const existing = await this.sessionManager.get(key);
       if (existing.messages.length > 0) {
@@ -84,15 +93,12 @@ export class NeovateAgent implements Agent {
       }
     }
 
-    // Ensure SDK session exists
     const mediaQueue = this.ensureMediaQueue(key);
     const sdkSession = await this.ensureSession(key, msg, mediaQueue, sessionRecap);
 
-    // Record user message and send to SDK
     await this.sessionManager.append(key, "user", msg.content);
     await this.sendMessage(sdkSession, msg);
 
-    // Stream response
     const stream = processStream(sdkSession, reply);
     let finalContent = "";
     for (;;) {
@@ -101,7 +107,6 @@ export class NeovateAgent implements Agent {
       yield value;
     }
 
-    // Record assistant response and yield final
     await this.sessionManager.append(key, "assistant", finalContent);
     const media = mediaQueue.drain();
     if (finalContent || media.length > 0) {
@@ -157,11 +162,11 @@ export class NeovateAgent implements Agent {
     const cutoff = session.messages.length - keepCount;
     const oldMessages = session.messages.slice(session.lastConsolidated, cutoff);
     if (oldMessages.length > 0) {
+      await this.flushMemoryBeforeTrim(oldMessages);
       await this.consolidateWithTimeout(oldMessages);
     }
     await this.sessionManager.trimBefore(key, cutoff);
 
-    // Build recap from remaining messages for conversational continuity
     let sessionRecap: string | undefined;
     const remaining = (await this.sessionManager.get(key)).messages;
     if (remaining.length > 0) {
@@ -201,6 +206,8 @@ export class NeovateAgent implements Agent {
     const sendFileTool = createSendFileTool({ mediaQueue, workspace: this.config.agent.workspace });
     const codeTool = createCodeTool({ config: this.config });
     const spawnTool = createSpawnTool({ subagentManager: this.subagentManager, channel: msg.channel, chatId: msg.chatId });
+    const memorySearchTool = createMemorySearchTool({ memoryRetrieval: this.memoryRetrieval });
+    const memoryGetTool = createMemoryGetTool({ memoryRetrieval: this.memoryRetrieval });
     const recapSection = sessionRecap
       ? `\n\n## Recent Conversation Recap\nThe session was trimmed for context management. Here is a recap of recent messages:\n${sessionRecap}`
       : "";
@@ -214,7 +221,7 @@ export class NeovateAgent implements Agent {
         {
           config() {
             return {
-              outputStyle: 'Minimal',
+              outputStyle: "Minimal",
               tools: { task: false, ExitPlanMode: false, AskUserQuestion: false },
             };
           },
@@ -222,7 +229,7 @@ export class NeovateAgent implements Agent {
             return `${original}\n\n${systemContext}${recapSection}`;
           },
           tool() {
-            return [cronTool, sendFileTool, codeTool, spawnTool];
+            return [cronTool, sendFileTool, codeTool, spawnTool, memorySearchTool, memoryGetTool];
           },
         }
       ],
@@ -233,9 +240,13 @@ export class NeovateAgent implements Agent {
 
   private async sendMessage(sdkSession: SDKSession, msg: InboundMessage): Promise<void> {
     const messageContent = (await this.skillManager.resolveSkillCommand(msg.content)) ?? msg.content;
+    const recallSection = await this.memoryRetrieval.buildRecallSection(messageContent);
+    const enrichedMessage = recallSection
+      ? `${recallSection}\n\n## User Message\n${messageContent}`
+      : messageContent;
 
     if (msg.media.length > 0) {
-      const parts = await resolveMedia(msg.media, messageContent);
+      const parts = await resolveMedia(msg.media, enrichedMessage);
       await sdkSession.send({
         type: "user",
         message: parts,
@@ -244,7 +255,36 @@ export class NeovateAgent implements Agent {
         sessionId: (sdkSession as any).sessionId,
       });
     } else {
-      await sdkSession.send(messageContent);
+      await sdkSession.send(enrichedMessage);
+    }
+  }
+
+  private async flushMemoryBeforeTrim(messages: ConversationEntry[]): Promise<void> {
+    if (!this.config.agent.memoryFlush?.enabled) return;
+    const timeout = this.config.agent.memoryFlush?.timeoutMs ?? 8000;
+    const currentMemory = await this.memoryManager.readMemory();
+
+    try {
+      const result = await Promise.race([
+        this.memoryFlushService.flush(messages, currentMemory),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("memory flush timeout")), timeout)
+        ),
+      ]);
+
+      let changed = false;
+      if (result.memoryNote) {
+        changed = (await this.memoryManager.mergeDurableNote(result.memoryNote)) || changed;
+      }
+      if (result.historyNote) {
+        await this.memoryManager.appendHistoryRotated(result.historyNote);
+        changed = true;
+      }
+      if (changed) {
+        await this.memoryRetrieval.sync();
+      }
+    } catch (error) {
+      logger.warn("agent", "memory flush failed, continuing with normal consolidation:", error);
     }
   }
 
@@ -260,11 +300,17 @@ export class NeovateAgent implements Agent {
         ),
       ]);
 
+      let changed = false;
       if (result.historyEntry) {
         await this.memoryManager.appendHistoryRotated(result.historyEntry);
+        changed = true;
       }
       if (result.memoryUpdate && result.memoryUpdate !== currentMemory) {
         await this.memoryManager.writeMemory(result.memoryUpdate);
+        changed = true;
+      }
+      if (changed) {
+        await this.memoryRetrieval.sync();
       }
       logger.info("agent", `consolidation ok, historyEntry=${!!result.historyEntry} memoryUpdated=${result.memoryUpdate !== currentMemory}`);
     } catch (err) {
@@ -275,6 +321,7 @@ export class NeovateAgent implements Agent {
         .map((m) => `${m.role}: ${m.content.slice(0, 200)}`)
         .join("\n");
       await this.memoryManager.appendHistoryRotated(`[raw-fallback] Consolidation failed. Recent messages:\n${summary}`);
+      await this.memoryRetrieval.sync();
     }
   }
 
@@ -282,6 +329,8 @@ export class NeovateAgent implements Agent {
     this.config = config;
     this.consolidationService.updateModel(config.agent.model);
     this.consolidationService.updateMaxMemorySize(config.agent.maxMemorySize ?? 8192);
+    this.memoryFlushService.updateModel(config.agent.model);
+    this.memoryRetrieval.updateConfig(config.agent.memorySearch);
     for (const [key, session] of this.sessions) {
       session.close();
       this.sessions.delete(key);

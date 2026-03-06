@@ -61,6 +61,28 @@ export interface AgentConfig {
   maxMemorySize?: number;
   consolidationTimeout?: number;
   subagentTimeout?: number;
+  memorySearch?: MemorySearchConfig;
+  memoryFlush?: MemoryFlushConfig;
+}
+
+export interface MemorySearchConfig {
+  enabled?: boolean;
+  provider?: "fts" | "hybrid";
+  maxResults?: number;
+  minScore?: number;
+  indexPath?: string;
+  autoRecall?: boolean;
+  recencyHalfLifeDays?: number;
+  embeddings?: {
+    enabled?: boolean;
+    model?: string;
+    dims?: number;
+  };
+}
+
+export interface MemoryFlushConfig {
+  enabled?: boolean;
+  timeoutMs?: number;
 }
 
 export interface Config {
@@ -78,6 +100,21 @@ export function defaultConfig(baseDir: string): Config {
       workspace: join(baseDir, "workspace"),
       maxMemorySize: 40960,
       consolidationTimeout: 60000,
+      memorySearch: {
+        enabled: true,
+        provider: "fts",
+        maxResults: 5,
+        minScore: 0,
+        autoRecall: true,
+        recencyHalfLifeDays: 30,
+        embeddings: {
+          enabled: false,
+        },
+      },
+      memoryFlush: {
+        enabled: true,
+        timeoutMs: 8000,
+      },
     },
     channels: {
       telegram: { enabled: false, token: "", allowFrom: [] },
@@ -210,7 +247,22 @@ export function loadConfig(baseDir: string): Config {
   if (existsSync(path)) {
     const raw = JSON.parse(readFileSync(path, "utf-8"));
     config = { ...defaults, ...raw };
-    config.agent = { ...defaults.agent, ...raw.agent };
+    config.agent = {
+      ...defaults.agent,
+      ...raw.agent,
+      memorySearch: {
+        ...defaults.agent.memorySearch,
+        ...raw.agent?.memorySearch,
+        embeddings: {
+          ...defaults.agent.memorySearch?.embeddings,
+          ...raw.agent?.memorySearch?.embeddings,
+        },
+      },
+      memoryFlush: {
+        ...defaults.agent.memoryFlush,
+        ...raw.agent?.memoryFlush,
+      },
+    };
     config.channels = {
       telegram: { ...defaults.channels.telegram, ...raw.channels?.telegram },
       cli: { ...defaults.channels.cli, ...raw.channels?.cli },

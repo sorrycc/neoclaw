@@ -63,7 +63,7 @@ ${runtime}
 ## Workspace
 Your workspace is at: ${ws}
 - Long-term memory: ${ws}/memory/MEMORY.md
-- History log: ${ws}/memory/HISTORY.md (grep-searchable)
+- History log: ${ws}/memory/HISTORY.md (indexed and grep-searchable)
 
 IMPORTANT: When responding to direct questions or conversations, reply directly with your text response.
 Only use the 'message' tool when you need to send a message to a specific chat channel.
@@ -71,7 +71,7 @@ For normal conversation, just respond with text - do not call the message tool.
 
 Always be helpful, accurate, and concise. When using tools, think step by step: what you know, what you need, and why you chose this tool.
 When remembering something important, write to ${ws}/memory/MEMORY.md
-To recall past events, grep ${ws}/memory/HISTORY.md`;
+Use indexed memory recall for prior decisions, preferences, dates, and earlier work. History grep remains available when needed.`;
   }
 
   private async loadBootstrapFiles(): Promise<string> {
@@ -83,7 +83,6 @@ To recall past events, grep ${ws}/memory/HISTORY.md`;
         const content = (await readFile(filePath, "utf-8")).trim();
         if (content) parts.push(`## ${filename}\n\n${content}`);
       } catch {
-        // file doesn't exist, skip
       }
     }
     return parts.join("\n\n");
