@@ -37,10 +37,11 @@ export interface OnboardOptions {
   pkgRoot: string;
   profileFlag?: string;
   force?: boolean;
+  mode?: "default" | "web";
 }
 
 export async function handleOnboardCommand(opts: OnboardOptions): Promise<string> {
-  const { baseDir, pkgRoot, profileFlag = "", force = false } = opts;
+  const { baseDir, pkgRoot, profileFlag = "", force = false, mode = "default" } = opts;
   const lines: string[] = [];
   const cfgPath = configPath(baseDir);
   const defaults = defaultConfig(baseDir);
@@ -51,21 +52,28 @@ export async function handleOnboardCommand(opts: OnboardOptions): Promise<string
     let workspace = defaults.agent.workspace;
 
     if (existsSync(cfgPath)) {
-      let overwrite = force;
-      if (!force) {
-        console.log(`Config already exists at ${cfgPath}`);
-        console.log("  y = overwrite with defaults (existing values will be lost)");
-        console.log("  N = refresh config, keeping existing values and adding new fields");
-        overwrite = await askYesNo("Overwrite? [y/N] ");
-      }
-      if (overwrite) {
-        writeFileSync(cfgPath, JSON.stringify(defaults, null, 2), "utf-8");
-        lines.push(`✓ Config reset to defaults at ${cfgPath}`);
-      } else {
+      if (mode === "web") {
         const config = loadConfig(baseDir);
         workspace = config.agent.workspace;
         writeFileSync(cfgPath, JSON.stringify(config, null, 2), "utf-8");
         lines.push(`✓ Config refreshed at ${cfgPath} (existing values preserved)`);
+      } else {
+        let overwrite = force;
+        if (!force) {
+          console.log(`Config already exists at ${cfgPath}`);
+          console.log("  y = overwrite with defaults (existing values will be lost)");
+          console.log("  N = refresh config, keeping existing values and adding new fields");
+          overwrite = await askYesNo("Overwrite? [y/N] ");
+        }
+        if (overwrite) {
+          writeFileSync(cfgPath, JSON.stringify(defaults, null, 2), "utf-8");
+          lines.push(`✓ Config reset to defaults at ${cfgPath}`);
+        } else {
+          const config = loadConfig(baseDir);
+          workspace = config.agent.workspace;
+          writeFileSync(cfgPath, JSON.stringify(config, null, 2), "utf-8");
+          lines.push(`✓ Config refreshed at ${cfgPath} (existing values preserved)`);
+        }
       }
     } else {
       writeFileSync(cfgPath, JSON.stringify(defaults, null, 2), "utf-8");
@@ -91,8 +99,13 @@ export async function handleOnboardCommand(opts: OnboardOptions): Promise<string
     lines.push("[neoclaw] ready!");
     lines.push("");
     lines.push("Next steps:");
-    lines.push("  1. Edit config at " + cfgPath);
-    lines.push(`  2. Run: neoclaw${profileFlag}`);
+    if (mode === "web") {
+      lines.push("  1. Complete setup in the Web Configuration UI");
+      lines.push(`  2. Run: neoclaw${profileFlag}`);
+    } else {
+      lines.push("  1. Edit config at " + cfgPath);
+      lines.push(`  2. Run: neoclaw${profileFlag}`);
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logger.error("onboard", msg);
