@@ -91,11 +91,39 @@ describe("web command helpers", () => {
     expect(read.channels.feishu.appId).toBe("cli_1");
   });
 
-  it("reuses existing web dist without rebuilding", () => {
-    const projectRoot = createTempProjectRoot("reuse");
+  it("rebuilds existing web dist on startup when webapp sources exist", () => {
+    const projectRoot = createTempProjectRoot("rebuild-existing");
     const webappDist = join(projectRoot, "webapp", "dist");
+    const distWeb = join(projectRoot, "dist", "web");
+    const builtIndex = join(distWeb, "index.html");
+    writeWebBuildDeps(projectRoot);
     mkdirSync(webappDist, { recursive: true });
-    writeFileSync(join(webappDist, "index.html"), "<html>ok</html>", "utf-8");
+    writeFileSync(join(webappDist, "index.html"), "<html>old</html>", "utf-8");
+
+    const calls: Array<{ cmd: string; args: string[]; cwd: string }> = [];
+    const resolved = ensureWebUiBuilt({
+      projectRoot,
+      cwd: projectRoot,
+      runner: (cmd, args, cwd) => {
+        calls.push({ cmd, args, cwd });
+        mkdirSync(dirname(builtIndex), { recursive: true });
+        writeFileSync(builtIndex, "<html>rebuilt</html>", "utf-8");
+        return { status: 0 };
+      },
+    });
+
+    expect(calls).toEqual([
+      { cmd: "bun", args: ["run", "build:web"], cwd: projectRoot },
+    ]);
+    expect(resolved).toBe(distWeb);
+  });
+
+  it("reuses existing dist when only packaged web assets are available", () => {
+    const projectRoot = join("/tmp", `neoclaw-web-packaged-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    tmpDirs.push(projectRoot);
+    const distWeb = join(projectRoot, "dist", "web");
+    mkdirSync(distWeb, { recursive: true });
+    writeFileSync(join(distWeb, "index.html"), "<html>packaged</html>", "utf-8");
 
     let calls = 0;
     const resolved = ensureWebUiBuilt({
@@ -108,7 +136,7 @@ describe("web command helpers", () => {
     });
 
     expect(calls).toBe(0);
-    expect(resolved).toBe(webappDist);
+    expect(resolved).toBe(distWeb);
   });
 
   it("builds compatible models URL and prefixes discovered custom models", async () => {
