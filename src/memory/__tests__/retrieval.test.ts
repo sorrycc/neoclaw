@@ -53,7 +53,7 @@ describe("MemoryRetrievalService", () => {
     expect(memoryHits[0]?.sourceKind).toBe("memory");
     expect(memoryHits[0]?.snippet).toContain("Feishu webhook mode");
 
-    const recall = await service.buildRecallSection("你还记得我们之前决定了什么吗？");
+    const recall = await service.buildRecallSection("你还记得我们之前决定的 pre-trim memory flush 吗？");
     expect(recall).toContain("Relevant Memory Recall");
     expect(recall).toContain("HISTORY-2026-03.md");
 
@@ -70,6 +70,61 @@ describe("MemoryRetrievalService", () => {
     const updatedHits = await service.search("Telegram urgent alerts");
     expect(updatedHits.length).toBeGreaterThan(0);
     expect(updatedHits[0]?.snippet).toContain("Telegram for urgent alerts");
+  });
+
+  it("prefers monthly history files to avoid duplicate recall hits", async () => {
+    const baseDir = join("/tmp", `neoclaw-memory-duplicate-history-${Date.now()}`);
+    const workspace = join(baseDir, "workspace");
+    const memoryDir = join(workspace, "memory");
+    tmpDirs.push(baseDir);
+
+    mkdirSync(memoryDir, { recursive: true });
+    const sharedEntry = [
+      "## 2026-03-06T10:30:00.000Z",
+      "We decided to keep only canonical monthly history hits.",
+    ].join("\n");
+    writeFileSync(join(memoryDir, "HISTORY.md"), sharedEntry, "utf-8");
+    writeFileSync(join(memoryDir, "HISTORY-2026-03.md"), sharedEntry, "utf-8");
+
+    const service = await MemoryRetrievalService.create(workspace, {
+      enabled: true,
+      autoRecall: true,
+      maxResults: 10,
+    });
+
+    const hits = await service.search("canonical monthly history hits", { limit: 10 });
+    expect(hits.some((hit) => hit.path.endsWith("HISTORY.md"))).toBe(false);
+    expect(hits.some((hit) => hit.path.endsWith("HISTORY-2026-03.md"))).toBe(true);
+  });
+
+  it("fallback search excludes unrelated boosted chunks", async () => {
+    const baseDir = join("/tmp", `neoclaw-memory-fallback-${Date.now()}`);
+    const workspace = join(baseDir, "workspace");
+    const memoryDir = join(workspace, "memory");
+    tmpDirs.push(baseDir);
+
+    mkdirSync(memoryDir, { recursive: true });
+    writeFileSync(join(memoryDir, "MEMORY.md"), ["# Preferences", "Stable unrelated memory content."].join("\n"), "utf-8");
+    writeFileSync(
+      join(memoryDir, "HISTORY-2026-03.md"),
+      ["## 2026-03-06T10:30:00.000Z", "OnlyDeletedUniqueToken abcxyzterm."].join("\n"),
+      "utf-8",
+    );
+
+    const service = await MemoryRetrievalService.create(workspace, {
+      enabled: true,
+      autoRecall: true,
+      maxResults: 10,
+    });
+    (service as any).db = undefined;
+    (service as any).dbReady = Promise.resolve();
+
+    const exactHits = await service.search("abcxyzterm", { limit: 10 });
+    expect(exactHits.length).toBeGreaterThan(0);
+    expect(exactHits.every((hit) => hit.snippet.includes("abcxyzterm"))).toBe(true);
+
+    const missingHits = await service.search("zzznonexistenttoken", { limit: 10 });
+    expect(missingHits).toHaveLength(0);
   });
 });
 

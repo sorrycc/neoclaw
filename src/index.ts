@@ -9,7 +9,7 @@ const __pkgRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 import { loadConfig, ensureWorkspaceDirs, watchConfig } from "./config/schema.js";
 import { logger, setLevel } from "./logger.js";
 import { MessageBus } from "./bus/message-bus.js";
-import { sessionKey, type InboundMessage } from "./bus/types.js";
+import { replyTarget, sessionKey, type InboundMessage } from "./bus/types.js";
 import { ChannelManager } from "./channels/manager.js";
 import { NeovateAgent } from "./agent/neovate-agent.js";
 import { CronService } from "./services/cron.js";
@@ -104,9 +104,10 @@ async function processMsg(
   } catch (err) {
     logger.error("main", `error processing message, session=${sessionKey(msg)}:`, err);
     statusStore?.pushError("main:process", err);
+    const { channel, chatId } = replyTarget(msg);
     bus.publishOutbound({
-      channel: msg.channel,
-      chatId: msg.chatId,
+      channel,
+      chatId,
       content: "Sorry, an error occurred processing your message.",
       media: [],
       metadata: {},

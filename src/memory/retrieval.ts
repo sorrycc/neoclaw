@@ -416,10 +416,12 @@ export class MemoryRetrievalService {
       .map((chunk) => {
         const lowered = chunk.content.toLowerCase();
         const matches = tokens.reduce((sum, token) => sum + (lowered.includes(token) ? 1 : 0), 0);
-        const score = matches / Math.max(tokens.length, 1) + this.sourceBoost(chunk.sourceKind) + this.recencyBoost(chunk.createdAt);
+        if (matches === 0) return undefined;
+        const lexicalScore = matches / Math.max(tokens.length, 1);
+        const score = lexicalScore + this.sourceBoost(chunk.sourceKind) + this.recencyBoost(chunk.createdAt);
         return { chunk, score };
       })
-      .filter((entry) => entry.score > 0)
+      .filter((entry): entry is { chunk: IndexedChunk; score: number } => Boolean(entry))
       .sort((a, b) => b.score - a.score)
       .slice(0, limit)
       .map(({ chunk, score }) => ({
@@ -465,7 +467,8 @@ export class MemoryRetrievalService {
   private tokenize(text: string): string[] {
     return text
       .toLowerCase()
-      .replace(/[^\p{L}\p{N}\s_-]+/gu, " ")
+      .replace(/[-]+/g, " ")
+      .replace(/[^\p{L}\p{N}\s_]+/gu, " ")
       .split(/\s+/)
       .map((token) => token.trim())
       .filter((token) => token.length >= 2)
@@ -480,7 +483,7 @@ export class MemoryRetrievalService {
   }
 
   private escapeFtsToken(token: string): string {
-    return token.replace(/[\"]+/g, "").replace(/[^\p{L}\p{N}_-]+/gu, "");
+    return token.replace(/[\"]+/g, "").replace(/[^\p{L}\p{N}_]+/gu, "");
   }
 
   private createSnippet(content: string): string {
@@ -493,16 +496,21 @@ export class MemoryRetrievalService {
     const memoryPath = join(this.memoryDir, "MEMORY.md");
     if (await this.pathExists(memoryPath)) files.push(memoryPath);
 
-    const historyPath = join(this.memoryDir, "HISTORY.md");
-    if (await this.pathExists(historyPath)) files.push(historyPath);
-
     try {
       const names = await readdir(this.memoryDir);
-      for (const name of names.sort()) {
-        if (/^HISTORY-\d{4}-\d{2}\.md$/.test(name)) {
+      const monthlyHistoryFiles = names
+        .filter((name) => /^HISTORY-\d{4}-\d{2}\.md$/.test(name))
+        .sort();
+
+      if (monthlyHistoryFiles.length > 0) {
+        for (const name of monthlyHistoryFiles) {
           files.push(join(this.memoryDir, name));
         }
+        return files;
       }
+
+      const historyPath = join(this.memoryDir, "HISTORY.md");
+      if (await this.pathExists(historyPath)) files.push(historyPath);
     } catch {
       return files;
     }

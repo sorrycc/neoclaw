@@ -1,8 +1,8 @@
 import { join } from "path";
 import { createSession, prompt, type SDKSession } from "@neovate/code";
 import type { Agent } from "./agent.js";
-import type { ChannelName, InboundMessage, OutboundMessage } from "../bus/types.js";
-import { sessionKey } from "../bus/types.js";
+import type { InboundMessage, OutboundMessage } from "../bus/types.js";
+import { replyTarget, sessionKey } from "../bus/types.js";
 import { ContextBuilder } from "./context.js";
 import { SkillManager } from "./skill-manager.js";
 import { MediaQueue } from "./media-queue.js";
@@ -72,8 +72,7 @@ export class NeovateAgent implements Agent {
 
   async *processMessage(msg: InboundMessage): AsyncGenerator<OutboundMessage> {
     const key = sessionKey(msg);
-    const outChannel = (msg.metadata.originChannel as ChannelName) || msg.channel;
-    const outChatId = (msg.metadata.originChatId as string) || msg.chatId;
+    const { channel: outChannel, chatId: outChatId } = replyTarget(msg);
     const reply = (content: string, progress = false): OutboundMessage => ({
       channel: outChannel, chatId: outChatId, content, media: [], metadata: { progress },
     });
