@@ -72,6 +72,12 @@ export class CronService {
   }
 
   private armJob(job: CronJob): void {
+    const existingTimer = this.timers.get(job.id);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+      this.timers.delete(job.id);
+    }
+
     if (!job.enabled) return;
 
     if (job.type === "at") {
@@ -203,6 +209,10 @@ export class CronService {
   async resumeJob(jobId: string): Promise<boolean> {
     const job = this.jobs.find((j) => j.id === jobId);
     if (!job) return false;
+    if (job.enabled && this.timers.has(jobId)) {
+      logger.info("cron", `resume skipped for already-active job=${jobId}`);
+      return true;
+    }
     job.enabled = true;
     if (this.running) this.armJob(job);
     await this.saveJobs();

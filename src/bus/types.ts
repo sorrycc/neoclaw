@@ -1,4 +1,4 @@
-export type ChannelName = "cli" | "telegram" | "dingtalk" | "system";
+export type ChannelName = "cli" | "telegram" | "dingtalk" | "feishu" | "system";
 
 export interface InboundMessage {
   channel: ChannelName;
@@ -21,4 +21,14 @@ export interface OutboundMessage {
 
 export function sessionKey(msg: InboundMessage): string {
   return `${msg.channel}:${msg.chatId}`;
+}
+
+export function replyTarget(msg: InboundMessage): Pick<OutboundMessage, "channel" | "chatId"> {
+  const originChannel = msg.metadata.originChannel;
+  const originChatId = msg.metadata.originChatId;
+
+  return {
+    channel: (typeof originChannel === "string" ? originChannel : msg.channel) as ChannelName,
+    chatId: typeof originChatId === "string" ? originChatId : msg.chatId,
+  };
 }
