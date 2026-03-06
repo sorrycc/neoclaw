@@ -14,6 +14,7 @@
   "step1Title": "Step 1: Choose AI Provider",
   "providerOAuthRequired": "OAuth Login Required",
   "providerOpenAiCompatible": "Standard OpenAI Compatible",
+  "providerCustomFormats": "OpenAI / Responses / Claude / Google formats",
   "providerApiKeyRequired": "API Key Required",
   "authorizePrefix": "Authorize",
   "initiatingLogin": "Initiating Login...",
@@ -37,7 +38,21 @@
   "overrideEndpointPrefix": "Override",
   "overrideEndpointSuffix": "API endpoint",
   "customOpenAiEndpointTitle": "Custom OpenAI-compatible Endpoint",
+  "customApiEndpointTitle": "Custom API Endpoint",
   "providerIdLabel": "Provider ID (Internal Usage)",
+  "apiFormatLabel": "API Format",
+  "apiFormatOption": {
+    "openai": "OpenAI Compatible",
+    "responses": "OpenAI Responses",
+    "anthropic": "Anthropic / Claude",
+    "google": "Google / Gemini"
+  },
+  "apiFormatHint": {
+    "openai": "Use this for providers exposing `/models` plus Chat Completions-style APIs.",
+    "responses": "Use this for OpenAI Responses-style services; model discovery still reads `/models`.",
+    "anthropic": "Use this for native Anthropic Claude APIs; model discovery sends `x-api-key` and `anthropic-version`.",
+    "google": "Use this for native Google Gemini APIs; model discovery calls the `models` list with `?key=`."
+  },
   "baseUrlLabel": "Base URL",
   "keyIfRequired": "Key if required",
   "connecting": "Connecting...",

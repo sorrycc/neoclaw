@@ -14,6 +14,7 @@
   "step1Title": "步骤 1：选择 AI 提供商",
   "providerOAuthRequired": "需要 OAuth 登录",
   "providerOpenAiCompatible": "标准 OpenAI 兼容接口",
+  "providerCustomFormats": "可选 OpenAI / Responses / Claude / Google 格式",
   "providerApiKeyRequired": "需要 API Key",
   "authorizePrefix": "授权",
   "initiatingLogin": "正在发起登录...",
@@ -37,7 +38,21 @@
   "overrideEndpointPrefix": "覆盖",
   "overrideEndpointSuffix": "API 地址",
   "customOpenAiEndpointTitle": "自定义 OpenAI 兼容接口",
+  "customApiEndpointTitle": "自定义 API 接口",
   "providerIdLabel": "Provider ID（内部使用）",
+  "apiFormatLabel": "API 格式",
+  "apiFormatOption": {
+    "openai": "OpenAI 兼容",
+    "responses": "OpenAI Responses",
+    "anthropic": "Anthropic / Claude",
+    "google": "Google / Gemini"
+  },
+  "apiFormatHint": {
+    "openai": "适用于兼容 `/models` 与 Chat Completions 风格接口的服务。",
+    "responses": "适用于 OpenAI Responses 风格服务，模型发现仍会读取 `/models`。",
+    "anthropic": "适用于 Anthropic 原生 Claude 接口，模型发现会使用 `x-api-key` 与 `anthropic-version`。",
+    "google": "适用于 Google Gemini 原生接口，模型发现会通过 `?key=` 调用 `models` 列表。"
+  },
   "baseUrlLabel": "Base URL",
   "keyIfRequired": "如需鉴权请填写",
   "connecting": "连接中...",

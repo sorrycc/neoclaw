@@ -2,6 +2,10 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, type ModelOption, type ProviderMeta } from './api';
 
+type CustomApiFormat = 'openai' | 'responses' | 'anthropic' | 'google';
+
+const CUSTOM_API_FORMATS: CustomApiFormat[] = ['openai', 'responses', 'anthropic', 'google'];
+
 export default function App() {
   const { t, i18n } = useTranslation();
   const locale = i18n.resolvedLanguage?.startsWith('zh') ? 'zh' : 'en';
@@ -41,7 +45,7 @@ export default function App() {
   const [isOAuthComplete, setIsOAuthComplete] = useState(false);
   const [apiKey, setApiKey] = useState('');
   const [baseURL, setBaseURL] = useState('');
-  const [customProviderObj, setCustomProviderObj] = useState({ id: 'custom-1', name: 'Custom', api: 'openai', apiFormat: 'openai', hasApiKey: true, source: 'custom', env: 'API_KEY', apiEnv: 'API_BASE' });
+  const [customProviderObj, setCustomProviderObj] = useState({ id: 'custom-1', name: 'Custom', api: 'openai', apiFormat: 'openai' as CustomApiFormat, hasApiKey: true, source: 'custom', env: 'API_KEY', apiEnv: 'API_BASE' });
   const [models, setModels] = useState<ModelOption[]>([]);
   const [isFetchingModels, setIsFetchingModels] = useState(false);
   const [showAdvancedProvider, setShowAdvancedProvider] = useState(false);
@@ -71,7 +75,7 @@ export default function App() {
 
   const providerAuthLabel = (provider: ProviderMeta): string => {
     if (provider.authType === 'oauth') return t('providerOAuthRequired');
-    if (provider.id === 'custom') return t('providerOpenAiCompatible');
+    if (provider.id === 'custom') return t('providerCustomFormats');
     return t('providerApiKeyRequired');
   };
 
@@ -79,6 +83,17 @@ export default function App() {
   const providerApiKeyPlaceholder = (providerName: string): string => `${t('apiKeyPlaceholderPrefix')} ${providerName} ${t('apiKeyPlaceholderSuffix')}`;
   const providerOverrideApiPlaceholder = (providerName: string): string => `${t('overrideEndpointPrefix')} ${providerName} ${t('overrideEndpointSuffix')}`;
   const providerAuthSuccess = (providerName: string): string => `${t('authSuccessPrefix')} ${providerName}`;
+  const customProviderApiFormat = customProviderObj.apiFormat;
+  const customBaseUrlPlaceholder = (() => {
+    switch (customProviderApiFormat) {
+      case 'anthropic':
+        return 'https://api.anthropic.com/v1';
+      case 'google':
+        return 'https://generativelanguage.googleapis.com/v1beta';
+      default:
+        return 'https://api.your-endpoint.com/v1';
+    }
+  })();
 
   const renderLanguageSwitch = () => (
     <div className="language-switch" aria-label={t('languageLabel')}>
@@ -234,6 +249,7 @@ export default function App() {
           mode: 'custom',
           customProvider: {
             ...customProviderObj,
+            api: customProviderObj.apiFormat,
             options: {
               ...(apiKey ? { apiKey } : {}),
               ...(baseURL ? { baseURL } : {}),
@@ -246,6 +262,7 @@ export default function App() {
             ...prev.providers,
             [customProviderObj.id]: {
               ...customProviderObj,
+              api: customProviderObj.apiFormat,
               options: {
                 ...(apiKey ? { apiKey } : {}),
                 ...(baseURL ? { baseURL } : {}),
@@ -471,14 +488,32 @@ export default function App() {
 
                 {selectedProvider.id === 'custom' && (
                   <div className="fade-in">
-                    <h3 style={{ fontSize: '1rem', marginBottom: '1rem' }}>{t('customOpenAiEndpointTitle')}</h3>
+                    <h3 style={{ fontSize: '1rem', marginBottom: '1rem' }}>{t('customApiEndpointTitle')}</h3>
                     <div className="form-group">
                       <label className="form-label">{t('providerIdLabel')}</label>
                       <input type="text" className="form-input" value={customProviderObj.id} onChange={(e) => setCustomProviderObj({ ...customProviderObj, id: e.target.value })} />
                     </div>
                     <div className="form-group">
+                      <label className="form-label">{t('apiFormatLabel')}</label>
+                      <select
+                        className="form-select"
+                        value={customProviderApiFormat}
+                        onChange={(e) => {
+                          const nextFormat = e.target.value as CustomApiFormat;
+                          setCustomProviderObj({ ...customProviderObj, api: nextFormat, apiFormat: nextFormat });
+                        }}
+                      >
+                        {CUSTOM_API_FORMATS.map((format) => (
+                          <option key={format} value={format}>{t(`apiFormatOption.${format}`)}</option>
+                        ))}
+                      </select>
+                      <p style={{ fontSize: '0.85rem', color: '#6b7280', marginTop: '8px' }}>
+                        {t(`apiFormatHint.${customProviderApiFormat}`)}
+                      </p>
+                    </div>
+                    <div className="form-group">
                       <label className="form-label">{t('baseUrlLabel')}</label>
-                      <input type="url" placeholder="https://api.your-endpoint.com/v1" className="form-input" value={baseURL} onChange={(e) => setBaseURL(e.target.value)} />
+                      <input type="url" placeholder={customBaseUrlPlaceholder} className="form-input" value={baseURL} onChange={(e) => setBaseURL(e.target.value)} />
                     </div>
                     <div className="form-group">
                       <label className="form-label">{t('apiKeyLabel')}</label>

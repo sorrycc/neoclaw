@@ -49,6 +49,7 @@ type EnsureWebUiBuiltOptions = {
 type RateState = { count: number; resetAt: number };
 type ModelOption = { label: string; value: string };
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+type CustomApiFormat = "openai" | "responses" | "anthropic" | "google";
 
 const BODY_LIMIT = 1024 * 1024;
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
@@ -406,6 +407,13 @@ export function buildOpenAiCompatibleModelsUrl(baseURL: string): string {
   return url.toString();
 }
 
+export function buildCustomModelsUrl(baseURL: string, apiFormat: CustomApiFormat): string {
+  if (apiFormat === "openai" || apiFormat === "responses" || apiFormat === "anthropic" || apiFormat === "google") {
+    return buildOpenAiCompatibleModelsUrl(baseURL);
+  }
+  return buildOpenAiCompatibleModelsUrl(baseURL);
+}
+
 function toModelOptions(providerId: string, modelIds: string[]): ModelOption[] {
   return modelIds.map((modelId) => ({
     label: modelId,
@@ -430,14 +438,56 @@ export async function discoverOpenAiCompatibleModels(
   apiKey?: string,
   fetchImpl: FetchLike = fetch,
 ): Promise<ModelOption[]> {
-  const url = buildOpenAiCompatibleModelsUrl(baseURL);
+  return discoverCustomProviderModels(providerId, baseURL, "openai", apiKey, fetchImpl);
+}
+
+function readCustomModelIds(payload: unknown, apiFormat: CustomApiFormat): string[] {
+  if (!payload || typeof payload !== "object") return [];
+
+  const source = apiFormat === "google"
+    ? (payload as { models?: Array<{ name?: unknown; displayName?: unknown } | string> }).models
+    : (payload as { data?: Array<{ id?: unknown; name?: unknown } | string> }).data;
+
+  return Array.from(new Set((source || [])
+    .map((entry) => {
+      if (typeof entry === "string") return entry.trim();
+      if (apiFormat === "google") {
+        const rawName = typeof entry?.name === "string" ? entry.name.trim() : "";
+        return rawName.replace(/^models\//, "");
+      }
+      const candidate = entry as { id?: unknown; name?: unknown };
+      if (typeof candidate.id === "string") return candidate.id.trim();
+      return typeof candidate.name === "string" ? candidate.name.trim() : "";
+    })
+    .filter(Boolean)));
+}
+
+export async function discoverCustomProviderModels(
+  providerId: string,
+  baseURL: string,
+  apiFormat: CustomApiFormat,
+  apiKey?: string,
+  fetchImpl: FetchLike = fetch,
+): Promise<ModelOption[]> {
+  const url = new URL(buildCustomModelsUrl(baseURL, apiFormat));
   const headers: Record<string, string> = {
     Accept: "application/json",
   };
   const token = apiKey?.trim();
-  if (token) headers.Authorization = `Bearer ${token}`;
+  if (token) {
+    if (apiFormat === "anthropic") {
+      headers["x-api-key"] = token;
+      headers["anthropic-version"] = "2023-06-01";
+    } else if (apiFormat === "google") {
+      url.searchParams.set("key", token);
+    } else {
+      headers.Authorization = `Bearer ${token}`;
+    }
+  } else if (apiFormat === "anthropic") {
+    headers["anthropic-version"] = "2023-06-01";
+  }
 
-  const response = await fetchImpl(url, {
+  const response = await fetchImpl(url.toString(), {
     method: "GET",
     headers,
   });
@@ -455,16 +505,11 @@ export async function discoverOpenAiCompatibleModels(
     throw new Error(detail || `models endpoint returned HTTP ${response.status}`);
   }
 
-  const payload = await response.json() as { data?: Array<{ id?: unknown } | string> };
-  const ids = Array.from(new Set((payload.data || [])
-    .map((entry) => {
-      if (typeof entry === "string") return entry.trim();
-      return typeof entry?.id === "string" ? entry.id.trim() : "";
-    })
-    .filter(Boolean)));
+  const payload = await response.json();
+  const ids = readCustomModelIds(payload, apiFormat);
 
   if (ids.length === 0) {
-    throw new Error("compatible endpoint returned no models");
+    throw new Error(`${apiFormat} endpoint returned no models`);
   }
 
   return toModelOptions(providerId, ids);
@@ -857,10 +902,10 @@ export async function handleWebCommand(opts: WebOptions): Promise<void> {
           // Also append an explicit "custom" marker option
           normalized.push({
             id: "custom",
-            name: "自定义 / 其他兼容 API",
+            name: "自定义 / 其他 API",
             authType: "custom",
             source: "custom",
-            api: "openai",
+            api: "custom",
             hasApiKey: true,
             apiFormat: "openai",
             env: "NEOCLAW_API_KEY",
@@ -923,16 +968,19 @@ export async function handleWebCommand(opts: WebOptions): Promise<void> {
             if (body.mode === "custom") {
               const cp = body.customProvider as any;
               const providerId = typeof cp?.id === "string" ? cp.id.trim() : "";
+              const apiFormat = typeof cp?.apiFormat === "string" ? cp.apiFormat.trim() as CustomApiFormat : "openai";
               const baseURL = typeof cp?.options?.baseURL === "string" ? cp.options.baseURL.trim() : "";
               const apiKey = typeof cp?.options?.apiKey === "string" ? cp.options.apiKey : undefined;
               if (!providerId) throw new Error("custom provider id required");
               if (!baseURL) throw new Error("custom provider baseURL required");
-              const models = await discoverOpenAiCompatibleModels(providerId, baseURL, apiKey);
+              const models = await discoverCustomProviderModels(providerId, baseURL, apiFormat, apiKey);
               sendJson(res, 200, {
                 models,
                 provider: {
                   ...cp,
                   id: providerId,
+                  api: apiFormat,
+                  apiFormat,
                   options: {
                     ...(apiKey?.trim() ? { apiKey: apiKey.trim() } : {}),
                     baseURL,
