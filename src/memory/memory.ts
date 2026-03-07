@@ -37,6 +37,23 @@ export class MemoryManager {
     await writeFile(this.memoryPath, content, "utf-8");
   }
 
+  async mergeDurableNote(note: string): Promise<boolean> {
+    const trimmed = note.trim();
+    if (!trimmed) return false;
+
+    const currentMemory = await this.readMemory();
+    if (currentMemory.includes(trimmed)) {
+      return false;
+    }
+
+    const nextMemory = currentMemory
+      ? `${currentMemory.trimEnd()}\n\n${trimmed}\n`
+      : `${trimmed}\n`;
+
+    await this.writeMemory(nextMemory);
+    return true;
+  }
+
   async appendHistory(entry: string): Promise<void> {
     const line = `\n## ${new Date().toISOString()}\n${entry}\n`;
     await appendFile(this.historyPath, line, "utf-8");
@@ -46,11 +63,9 @@ export class MemoryManager {
     const now = new Date();
     const line = `\n## ${now.toISOString()}\n${entry}\n`;
 
-    // Write to main HISTORY.md (backward compat)
     await appendFile(this.historyPath, line, "utf-8");
 
-    // Write to monthly rotated file
-    const month = now.toISOString().slice(0, 7); // YYYY-MM
+    const month = now.toISOString().slice(0, 7);
     const rotatedPath = join(this.memoryDir, `HISTORY-${month}.md`);
     await appendFile(rotatedPath, line, "utf-8");
   }

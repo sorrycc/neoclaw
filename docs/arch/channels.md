@@ -21,12 +21,14 @@ src/channels/
   manager.ts        — channel registry, dispatch loop, config reload
   cli.ts            — CLI channel (readline)
   telegram.ts       — Telegram channel (grammy bot)
+  dingtalk.ts       — DingTalk channel
+  feishu.ts         — Feishu channel (experimental, webhook/websocket inbound + outbound text)
 ```
 
 ## Channel Interface
 
 ```typescript
-type ChannelName = "cli" | "telegram" | "system";
+type ChannelName = "cli" | "telegram" | "dingtalk" | "feishu" | "system";
 
 interface Channel {
   readonly name: ChannelName;
@@ -39,7 +41,7 @@ interface Channel {
 
 `ChannelName` is a union type used in both `InboundMessage.channel` and `OutboundMessage.channel`. The `"system"` variant is reserved for synthetic messages (e.g. cron jobs) that should not be dispatched to any channel.
 
-`updateConfig` is optional. Channels that support hot-reload (currently only Telegram) implement it. The manager calls it via the interface without type-checking the concrete class.
+`updateConfig` is optional. Channels that support hot-reload implement it. The manager calls it via the interface without type-checking the concrete class.
 
 ## Message Types
 
@@ -96,6 +98,8 @@ Reads `config.channels` and instantiates enabled channels:
 constructor(config, bus)
   if config.channels.cli.enabled    → new CLIChannel(bus)
   if config.channels.telegram.enabled → new TelegramChannel(config, bus, workspace)
+  if config.channels.dingtalk.enabled → new DingtalkChannel(config, bus)
+  if config.channels.feishu.enabled → new FeishuChannel(config, bus)
 ```
 
 ### startAll()
@@ -126,7 +130,11 @@ stop()
 
 ### updateConfig(config)
 
-Iterates all registered channels and calls `channel.updateConfig?.(...)` via the interface. No `instanceof` checks — channels that don't support config reload simply don't implement the method.
+Applies dynamic channel changes on hot reload:
+
+- `false -> true`: instantiate + `start()`
+- `true -> false`: `stop()` + unregister
+- `true -> true`: call `updateConfig?.(...)`
 
 ## CLI Channel
 
