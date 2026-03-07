@@ -35,6 +35,15 @@ type WebOptions = {
   host?: string;
   port?: number;
   token?: string;
+  autoStart?: WebAutoStartOptions;
+};
+
+type WebAutoStartOptions = {
+  enabled: boolean;
+  startArgs?: string[];
+  cwd?: string;
+  projectRoot?: string;
+  useBunRuntime?: boolean;
 };
 
 type JsonBody = Record<string, unknown>;
@@ -49,6 +58,36 @@ type EnsureWebUiBuiltOptions = {
 type RateState = { count: number; resetAt: number };
 type ModelOption = { label: string; value: string };
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+type CustomApiFormat = "openai" | "responses" | "anthropic" | "google";
+
+export type AutoStartCommand = {
+  mode: "bun" | "neoclaw";
+  cmd: string;
+  args: string[];
+  cwd: string;
+  display: string;
+};
+
+export type AutoStartResult = {
+  enabled: boolean;
+  started: boolean;
+  alreadyStarted?: boolean;
+  command?: string;
+  mode?: "bun" | "neoclaw";
+  pid?: number;
+  error?: string;
+};
+
+export type ConfigSaveResult = {
+  ok: boolean;
+  warning: string;
+  startCommand?: string;
+  config: Config;
+};
+
+export type WebCommandResult = {
+  startAgent: boolean;
+};
 
 const BODY_LIMIT = 1024 * 1024;
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
@@ -59,6 +98,12 @@ export interface ConfigSnapshotMeta {
   id: string;
   createdAt: string;
   size: number;
+  reason: string;
+}
+
+export interface ConfigSnapshotPreview {
+  snapshot: ConfigSnapshotMeta;
+  config: Config;
 }
 
 function createRateLimiter(limit: number, windowMs: number): (key: string) => boolean {
@@ -233,6 +278,89 @@ function defaultCommandRunner(cmd: string, args: string[], cwd: string): Command
   };
 }
 
+function quoteShellArg(arg: string): string {
+  return /[^A-Za-z0-9_./:-]/.test(arg) ? JSON.stringify(arg) : arg;
+}
+
+function isPidRunning(pid: number | null | undefined): boolean {
+  if (!pid || !Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error: any) {
+    return error?.code === "EPERM";
+  }
+}
+
+function readActiveAgentPid(baseDir: string): number | undefined {
+  const snapshot = readRuntimeStatusSnapshot(baseDir);
+  const pid = snapshot.agent.pid;
+  if (!snapshot.agent.running || !isPidRunning(pid)) return undefined;
+  return pid ?? undefined;
+}
+
+export function resolveAutoStartCommand(options: {
+  startArgs?: string[];
+  cwd?: string;
+  projectRoot?: string;
+  useBunRuntime?: boolean;
+} = {}): AutoStartCommand {
+  const startArgs = options.startArgs ?? [];
+  const useBunRuntime = options.useBunRuntime ?? typeof process.versions.bun === "string";
+
+  if (useBunRuntime) {
+    const args = startArgs.length > 0 ? ["run", "start", "--", ...startArgs] : ["run", "start"];
+    return {
+      mode: "bun",
+      cmd: "bun",
+      args,
+      cwd: options.projectRoot ?? PROJECT_ROOT,
+      display: ["bun", ...args].map(quoteShellArg).join(" "),
+    };
+  }
+
+  return {
+    mode: "neoclaw",
+    cmd: "neoclaw",
+    args: startArgs,
+    cwd: options.cwd ?? process.cwd(),
+    display: ["neoclaw", ...startArgs].map(quoteShellArg).join(" "),
+  };
+}
+
+export async function triggerAutoStart(
+  baseDir: string,
+  options: WebAutoStartOptions | undefined,
+) : Promise<AutoStartResult> {
+  if (!options?.enabled) return { enabled: false, started: false };
+
+  const command = resolveAutoStartCommand({
+    startArgs: options.startArgs,
+    cwd: options.cwd,
+    projectRoot: options.projectRoot,
+    useBunRuntime: options.useBunRuntime,
+  });
+
+  const activePid = readActiveAgentPid(baseDir);
+  if (activePid) {
+    return {
+      enabled: true,
+      started: false,
+      alreadyStarted: true,
+      command: command.display,
+      mode: command.mode,
+      pid: activePid,
+    };
+  }
+
+  return {
+    enabled: true,
+    started: true,
+    command: command.display,
+    mode: command.mode,
+  };
+}
+
 export function ensureWebUiBuilt(options: EnsureWebUiBuiltOptions = {}): string {
   const {
     runner = defaultCommandRunner,
@@ -289,6 +417,12 @@ function snapshotFilePath(baseDir: string, id: string): string {
   return join(snapshotDir(baseDir), normalizeSnapshotId(id));
 }
 
+function parseSnapshotReason(id: string): string {
+  const base = basename(id, ".json");
+  const match = base.match(/^\d{8}-\d+-(.+)-\d+$/);
+  return match?.[1]?.trim() || "manual";
+}
+
 export function listConfigSnapshots(baseDir: string): ConfigSnapshotMeta[] {
   const dir = snapshotDir(baseDir);
   if (!existsSync(dir)) return [];
@@ -300,6 +434,7 @@ export function listConfigSnapshots(baseDir: string): ConfigSnapshotMeta[] {
         id: name,
         createdAt: st.mtime.toISOString(),
         size: st.size,
+        reason: parseSnapshotReason(name),
       };
     })
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -335,12 +470,25 @@ export function createConfigSnapshot(baseDir: string, config: Config, reason: st
     id,
     createdAt: st.mtime.toISOString(),
     size: st.size,
+    reason,
   };
 }
 
 export function readSnapshotConfig(baseDir: string, id: string): Config {
   const file = snapshotFilePath(baseDir, id);
   return JSON.parse(readFileSync(file, "utf-8")) as Config;
+}
+
+export function readConfigSnapshotPreview(baseDir: string, id: string): ConfigSnapshotPreview {
+  const normalizedId = normalizeSnapshotId(id);
+  const snapshot = listConfigSnapshots(baseDir).find((entry) => entry.id === normalizedId);
+  if (!snapshot) {
+    throw new Error("snapshot not found");
+  }
+  return {
+    snapshot,
+    config: maskConfig(readSnapshotConfig(baseDir, normalizedId)),
+  };
 }
 
 function mergeImportedConfig(current: Config, incoming: unknown): Config {
@@ -406,6 +554,13 @@ export function buildOpenAiCompatibleModelsUrl(baseURL: string): string {
   return url.toString();
 }
 
+export function buildCustomModelsUrl(baseURL: string, apiFormat: CustomApiFormat): string {
+  if (apiFormat === "openai" || apiFormat === "responses" || apiFormat === "anthropic" || apiFormat === "google") {
+    return buildOpenAiCompatibleModelsUrl(baseURL);
+  }
+  return buildOpenAiCompatibleModelsUrl(baseURL);
+}
+
 function toModelOptions(providerId: string, modelIds: string[]): ModelOption[] {
   return modelIds.map((modelId) => ({
     label: modelId,
@@ -430,14 +585,56 @@ export async function discoverOpenAiCompatibleModels(
   apiKey?: string,
   fetchImpl: FetchLike = fetch,
 ): Promise<ModelOption[]> {
-  const url = buildOpenAiCompatibleModelsUrl(baseURL);
+  return discoverCustomProviderModels(providerId, baseURL, "openai", apiKey, fetchImpl);
+}
+
+function readCustomModelIds(payload: unknown, apiFormat: CustomApiFormat): string[] {
+  if (!payload || typeof payload !== "object") return [];
+
+  const source = apiFormat === "google"
+    ? (payload as { models?: Array<{ name?: unknown; displayName?: unknown } | string> }).models
+    : (payload as { data?: Array<{ id?: unknown; name?: unknown } | string> }).data;
+
+  return Array.from(new Set((source || [])
+    .map((entry) => {
+      if (typeof entry === "string") return entry.trim();
+      if (apiFormat === "google") {
+        const rawName = typeof entry?.name === "string" ? entry.name.trim() : "";
+        return rawName.replace(/^models\//, "");
+      }
+      const candidate = entry as { id?: unknown; name?: unknown };
+      if (typeof candidate.id === "string") return candidate.id.trim();
+      return typeof candidate.name === "string" ? candidate.name.trim() : "";
+    })
+    .filter(Boolean)));
+}
+
+export async function discoverCustomProviderModels(
+  providerId: string,
+  baseURL: string,
+  apiFormat: CustomApiFormat,
+  apiKey?: string,
+  fetchImpl: FetchLike = fetch,
+): Promise<ModelOption[]> {
+  const url = new URL(buildCustomModelsUrl(baseURL, apiFormat));
   const headers: Record<string, string> = {
     Accept: "application/json",
   };
   const token = apiKey?.trim();
-  if (token) headers.Authorization = `Bearer ${token}`;
+  if (token) {
+    if (apiFormat === "anthropic") {
+      headers["x-api-key"] = token;
+      headers["anthropic-version"] = "2023-06-01";
+    } else if (apiFormat === "google") {
+      url.searchParams.set("key", token);
+    } else {
+      headers.Authorization = `Bearer ${token}`;
+    }
+  } else if (apiFormat === "anthropic") {
+    headers["anthropic-version"] = "2023-06-01";
+  }
 
-  const response = await fetchImpl(url, {
+  const response = await fetchImpl(url.toString(), {
     method: "GET",
     headers,
   });
@@ -455,16 +652,11 @@ export async function discoverOpenAiCompatibleModels(
     throw new Error(detail || `models endpoint returned HTTP ${response.status}`);
   }
 
-  const payload = await response.json() as { data?: Array<{ id?: unknown } | string> };
-  const ids = Array.from(new Set((payload.data || [])
-    .map((entry) => {
-      if (typeof entry === "string") return entry.trim();
-      return typeof entry?.id === "string" ? entry.id.trim() : "";
-    })
-    .filter(Boolean)));
+  const payload = await response.json();
+  const ids = readCustomModelIds(payload, apiFormat);
 
   if (ids.length === 0) {
-    throw new Error("compatible endpoint returned no models");
+    throw new Error(`${apiFormat} endpoint returned no models`);
   }
 
   return toModelOptions(providerId, ids);
@@ -695,11 +887,21 @@ function isStateChanging(req: IncomingMessage): boolean {
   return req.method === "POST" || req.method === "PUT" || req.method === "PATCH" || req.method === "DELETE";
 }
 
-export async function handleWebCommand(opts: WebOptions): Promise<void> {
+export async function handleWebCommand(opts: WebOptions): Promise<WebCommandResult> {
   const host = opts.host || "127.0.0.1";
   const port = opts.port || 3180;
   const accessToken = opts.token || process.env.NEOCLAW_WEB_TOKEN || randomBytes(18).toString("base64url");
   const csrfToken = randomBytes(18).toString("base64url");
+  let startAgent = false;
+  let closing = false;
+  let resolveClosed: (() => void) | null = null;
+  let server: ReturnType<typeof createServer>;
+
+  const requestClose = () => {
+    if (closing) return;
+    closing = true;
+    server.close(() => resolveClosed?.());
+  };
 
   mkdirSync(opts.baseDir, { recursive: true });
   const distDir = ensureWebUiBuilt();
@@ -707,7 +909,7 @@ export async function handleWebCommand(opts: WebOptions): Promise<void> {
   const authLimiter = createRateLimiter(30, 60_000);
   const apiLimiter = createRateLimiter(300, 60_000);
 
-  const server = createServer(async (req, res) => {
+  server = createServer(async (req, res) => {
     try {
       const method = req.method || "GET";
       const url = new URL(req.url || "/", `http://${req.headers.host || `${host}:${port}`}`);
@@ -800,6 +1002,20 @@ export async function handleWebCommand(opts: WebOptions): Promise<void> {
           return;
         }
 
+        if (url.pathname.startsWith("/api/config/snapshots/") && method === "GET") {
+          const snapshotId = decodeURIComponent(url.pathname.slice("/api/config/snapshots/".length));
+          if (!snapshotId) {
+            sendJson(res, 400, { error: "snapshot id required" });
+            return;
+          }
+          try {
+            sendJson(res, 200, readConfigSnapshotPreview(opts.baseDir, snapshotId));
+          } catch {
+            sendJson(res, 404, { error: "snapshot not found" });
+          }
+          return;
+        }
+
         if (url.pathname === "/api/config/import" && method === "POST") {
           const body = await readJsonBody(req);
           const current = loadConfig(opts.baseDir);
@@ -857,10 +1073,10 @@ export async function handleWebCommand(opts: WebOptions): Promise<void> {
           // Also append an explicit "custom" marker option
           normalized.push({
             id: "custom",
-            name: "自定义 / 其他兼容 API",
+            name: "自定义 / 其他 API",
             authType: "custom",
             source: "custom",
-            api: "openai",
+            api: "custom",
             hasApiKey: true,
             apiFormat: "openai",
             env: "NEOCLAW_API_KEY",
@@ -923,16 +1139,19 @@ export async function handleWebCommand(opts: WebOptions): Promise<void> {
             if (body.mode === "custom") {
               const cp = body.customProvider as any;
               const providerId = typeof cp?.id === "string" ? cp.id.trim() : "";
+              const apiFormat = typeof cp?.apiFormat === "string" ? cp.apiFormat.trim() as CustomApiFormat : "openai";
               const baseURL = typeof cp?.options?.baseURL === "string" ? cp.options.baseURL.trim() : "";
               const apiKey = typeof cp?.options?.apiKey === "string" ? cp.options.apiKey : undefined;
               if (!providerId) throw new Error("custom provider id required");
               if (!baseURL) throw new Error("custom provider baseURL required");
-              const models = await discoverOpenAiCompatibleModels(providerId, baseURL, apiKey);
+              const models = await discoverCustomProviderModels(providerId, baseURL, apiFormat, apiKey);
               sendJson(res, 200, {
                 models,
                 provider: {
                   ...cp,
                   id: providerId,
+                  api: apiFormat,
+                  apiFormat,
                   options: {
                     ...(apiKey?.trim() ? { apiKey: apiKey.trim() } : {}),
                     baseURL,
@@ -978,11 +1197,30 @@ export async function handleWebCommand(opts: WebOptions): Promise<void> {
           }
 
           writeFileSync(configPath(opts.baseDir), JSON.stringify(incoming, null, 2), "utf-8");
+          const startCommand = opts.autoStart?.enabled
+            ? resolveAutoStartCommand({
+                startArgs: opts.autoStart.startArgs,
+                cwd: opts.autoStart.cwd,
+                projectRoot: opts.autoStart.projectRoot,
+                useBunRuntime: opts.autoStart.useBunRuntime,
+              }).display
+            : undefined;
           sendJson(res, 200, {
             ok: true,
-            warning: "配置已写入。若正在运行 neoclaw 主进程，watcher 将自动热更新。",
+            warning: "配置已写入。启动 Agent 前，可先在当前页面测试模型连通性。",
+            startCommand,
             config: maskConfig(loadConfig(opts.baseDir)),
-          });
+          } satisfies ConfigSaveResult);
+          return;
+        }
+
+        if (url.pathname === "/api/agent/start" && method === "POST") {
+          const started = await triggerAutoStart(opts.baseDir, opts.autoStart);
+          sendJson(res, started.error ? 500 : 200, started);
+          if (started.started && !started.alreadyStarted) {
+            startAgent = true;
+            setImmediate(requestClose);
+          }
           return;
         }
 
@@ -1023,12 +1261,13 @@ export async function handleWebCommand(opts: WebOptions): Promise<void> {
   logger.info("web", `use header: Authorization: Bearer <token>`);
 
   await new Promise<void>((resolve) => {
-    const close = () => {
-      server.close(() => resolve());
-    };
+    resolveClosed = resolve;
+    const close = () => requestClose();
     process.on("SIGINT", close);
     process.on("SIGTERM", close);
   });
+
+  return { startAgent };
 }
 
 export function parseWebHost(value: unknown): string {

@@ -89,6 +89,14 @@ function resolveWebOptions(argv: yargsParser.Arguments): { host: string; port: n
   };
 }
 
+function resolveProfileArgs(argv: yargsParser.Arguments): string[] {
+  if (typeof argv.profile === "string" && argv.profile.trim()) {
+    return ["--profile", argv.profile.trim()];
+  }
+  if (argv.dev) return ["--dev"];
+  return [];
+}
+
 const INTERRUPT_COMMANDS = new Set(["/stop"]);
 
 async function processMsg(
@@ -134,75 +142,10 @@ async function mainLoop(bus: MessageBus, agent: NeovateAgent, statusStore?: Runt
   }
 }
 
-async function main(): Promise<void> {
-  const argv = yargsParser(process.argv.slice(2));
-  const baseDir = resolveBaseDir(argv);
-  const subcommand = argv._[0] as string | undefined;
-
-  if (argv.v || argv.version) {
-    console.log(pkg.version);
-    process.exit(0);
-  }
-
-  if (argv.h || argv.help || subcommand === "help") {
-    showHelp();
-    process.exit(0);
-  }
-
-  if (subcommand === "status") {
-    const config = loadConfig(baseDir);
-    ensureWorkspaceDirs(config.agent.workspace);
-    const bus = new MessageBus();
-    const cron = new CronService(config.agent.workspace, bus);
-    await cron.init();
-    console.log(handleStatusCommand(config, cron, baseDir));
-    process.exit(0);
-  }
-
-  if (subcommand === "onboard") {
-    const flag = argv.profile ? ` --profile ${argv.profile}` : argv.dev ? " --dev" : "";
-    const mode = resolveOnboardMode(argv);
-    const result = await handleOnboardCommand({
-      baseDir,
-      pkgRoot: __pkgRoot,
-      profileFlag: flag,
-      force: !!(argv.yes || argv.y),
-      mode,
-    });
-    console.log(result);
-
-    if (mode === "web") {
-      await handleWebCommand({
-        baseDir,
-        ...resolveWebOptions(argv),
-      });
-    }
-
-    process.exit(0);
-  }
-
-  if (subcommand === "cron") {
-    const config = loadConfig(baseDir);
-    ensureWorkspaceDirs(config.agent.workspace);
-    const bus = new MessageBus();
-    const cron = new CronService(config.agent.workspace, bus);
-    await cron.init();
-    const args = argv._.slice(1).map(String);
-    console.log(await handleCronCommand(cron, args));
-    process.exit(0);
-  }
-
-  if (subcommand === "web") {
-    await handleWebCommand({
-      baseDir,
-      ...resolveWebOptions(argv),
-    });
-    process.exit(0);
-  }
-
+async function runAgent(baseDir: string, profileHint: string): Promise<void> {
   if (!existsSync(baseDir)) {
     logger.error("neoclaw", `profile not initialized at ${baseDir}`);
-    logger.error("neoclaw", `Run: neoclaw onboard${argv.profile ? ` --profile ${argv.profile}` : argv.dev ? " --dev" : ""}`);
+    logger.error("neoclaw", `Run: neoclaw onboard${profileHint}`);
     process.exit(1);
   }
 
@@ -263,6 +206,87 @@ async function main(): Promise<void> {
     cron.start(),
     heartbeat.start(),
   ]);
+}
+
+async function main(): Promise<void> {
+  const argv = yargsParser(process.argv.slice(2));
+  const baseDir = resolveBaseDir(argv);
+  const subcommand = argv._[0] as string | undefined;
+  const profileHint = argv.profile ? ` --profile ${argv.profile}` : argv.dev ? " --dev" : "";
+
+  if (argv.v || argv.version) {
+    console.log(pkg.version);
+    process.exit(0);
+  }
+
+  if (argv.h || argv.help || subcommand === "help") {
+    showHelp();
+    process.exit(0);
+  }
+
+  if (subcommand === "status") {
+    const config = loadConfig(baseDir);
+    ensureWorkspaceDirs(config.agent.workspace);
+    const bus = new MessageBus();
+    const cron = new CronService(config.agent.workspace, bus);
+    await cron.init();
+    console.log(handleStatusCommand(config, cron, baseDir));
+    process.exit(0);
+  }
+
+  if (subcommand === "onboard") {
+    const mode = resolveOnboardMode(argv);
+    const profileArgs = resolveProfileArgs(argv);
+    const result = await handleOnboardCommand({
+      baseDir,
+      pkgRoot: __pkgRoot,
+      profileFlag: profileHint,
+      force: !!(argv.yes || argv.y),
+      mode,
+    });
+    console.log(result);
+
+    if (mode === "web") {
+      const webResult = await handleWebCommand({
+        baseDir,
+        ...resolveWebOptions(argv),
+        autoStart: {
+          enabled: true,
+          startArgs: profileArgs,
+        },
+      });
+      if (webResult.startAgent) await runAgent(baseDir, profileHint);
+    }
+
+    process.exit(0);
+  }
+
+  if (subcommand === "cron") {
+    const config = loadConfig(baseDir);
+    ensureWorkspaceDirs(config.agent.workspace);
+    const bus = new MessageBus();
+    const cron = new CronService(config.agent.workspace, bus);
+    await cron.init();
+    const args = argv._.slice(1).map(String);
+    console.log(await handleCronCommand(cron, args));
+    process.exit(0);
+  }
+
+  if (subcommand === "web") {
+    const profileArgs = resolveProfileArgs(argv);
+    const webResult = await handleWebCommand({
+      baseDir,
+      ...resolveWebOptions(argv),
+      autoStart: {
+        enabled: true,
+        startArgs: profileArgs,
+      },
+    });
+    if (webResult.startAgent) await runAgent(baseDir, profileHint);
+    process.exit(0);
+  }
+
+  await runAgent(baseDir, profileHint);
 }
 
 main().catch((err) => {
