@@ -1,5 +1,5 @@
 import { join } from "path";
-import { readFile, writeFile, appendFile, mkdir, access } from "fs/promises";
+import { readFile, writeFile, appendFile, mkdir, access, readdir, rm } from "fs/promises";
 import { logger } from "../logger.js";
 
 interface SessionEntry {
@@ -71,6 +71,41 @@ export class SessionManager {
     return session;
   }
 
+  async exists(key: string): Promise<boolean> {
+    try {
+      await access(this.filePath(key));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async list(): Promise<Session[]> {
+    const files = await readdir(this.sessionsDir).catch(() => []);
+    const sessions: Session[] = [];
+
+    for (const file of files) {
+      if (!file.endsWith(".jsonl")) continue;
+
+      try {
+        const raw = await readFile(join(this.sessionsDir, file), "utf-8");
+        const metaLine = raw.split("\n").find(Boolean);
+        if (!metaLine) continue;
+        const meta = JSON.parse(metaLine) as { _type?: string; key?: string };
+        if (meta._type !== "metadata" || !meta.key) continue;
+        sessions.push(await this.get(meta.key));
+      } catch (error) {
+        logger.error("session", `failed to list session file ${file}`, error);
+      }
+    }
+
+    return sessions.sort((left, right) => {
+      const leftTime = left.messages.at(-1)?.timestamp || left.createdAt;
+      const rightTime = right.messages.at(-1)?.timestamp || right.createdAt;
+      return rightTime.localeCompare(leftTime);
+    });
+  }
+
   async append(key: string, role: string, content: string): Promise<void> {
     logger.debug("session", "append:", key, role);
     const session = await this.get(key);
@@ -93,6 +128,11 @@ export class SessionManager {
     const meta: SessionMeta = { _type: "metadata", key, createdAt: new Date().toISOString(), lastConsolidated: 0 };
     await writeFile(path, JSON.stringify(meta) + "\n", "utf-8");
     this.cache.set(key, { key, messages: [], lastConsolidated: 0, createdAt: meta.createdAt });
+  }
+
+  async delete(key: string): Promise<void> {
+    this.cache.delete(key);
+    await rm(this.filePath(key), { force: true });
   }
 
   async updateConsolidated(key: string, index: number): Promise<void> {

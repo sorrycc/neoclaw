@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "http";
-import { spawnSync } from "child_process";
-import { randomBytes, timingSafeEqual } from "crypto";
+import { spawn, spawnSync } from "child_process";
+import { randomBytes, randomUUID, timingSafeEqual } from "crypto";
 import {
   existsSync,
   mkdirSync,
@@ -14,6 +14,9 @@ import {
 import { join, extname, resolve, dirname, basename, sep } from "path";
 import { fileURLToPath } from "url";
 import { createSession } from "@neovate/code";
+import cronParser from "cron-parser";
+
+const { parseExpression } = cronParser;
 
 let _headlessSession: any = null;
 async function getHeadlessBus(cwd: string) {
@@ -26,8 +29,12 @@ async function getHeadlessBus(cwd: string) {
   }
   return _headlessSession.messageBus;
 }
-import { configPath, loadConfig, type Config } from "../config/schema.js";
+import { configPath, ensureWorkspaceDirs, loadConfig, type Config } from "../config/schema.js";
+import { SkillManager } from "../agent/skill-manager.js";
+import { SessionManager, type Session } from "../session/manager.js";
 import { logger } from "../logger.js";
+import { MessageBus } from "../bus/message-bus.js";
+import { CronService, type CronJob } from "../services/cron.js";
 import { readRuntimeStatusSnapshot } from "../runtime/status-store.js";
 
 type WebOptions = {
@@ -44,6 +51,7 @@ type WebAutoStartOptions = {
   cwd?: string;
   projectRoot?: string;
   useBunRuntime?: boolean;
+  launcher?: (command: AutoStartCommand) => { pid?: number; error?: string };
 };
 
 type JsonBody = Record<string, unknown>;
@@ -59,6 +67,7 @@ type RateState = { count: number; resetAt: number };
 type ModelOption = { label: string; value: string };
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 type CustomApiFormat = "openai" | "responses" | "anthropic" | "google";
+type WebSdkSession = Awaited<ReturnType<typeof createSession>>;
 
 export type AutoStartCommand = {
   mode: "bun" | "neoclaw";
@@ -105,6 +114,72 @@ export interface ConfigSnapshotPreview {
   snapshot: ConfigSnapshotMeta;
   config: Config;
 }
+
+type ChatSessionSummary = {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+  preview: string;
+};
+
+type ChatMessagePayload = {
+  role: string;
+  content: string;
+  timestamp: string;
+};
+
+type ChatSessionPayload = ChatSessionSummary & {
+  messages: ChatMessagePayload[];
+};
+
+type ChatStreamEvent =
+  | { type: "delta"; delta: string }
+  | { type: "done"; message: ChatMessagePayload; session: ChatSessionSummary }
+  | { type: "error"; error: string };
+
+type CronJobPayload = CronJob & { nextRunPreview?: string };
+
+type LocalSkillPayload = {
+  name: string;
+  description: string;
+  dirName: string;
+  path: string;
+  relativePath: string;
+  updatedAt: string;
+};
+
+type LocalSkillDetailPayload = LocalSkillPayload & {
+  content: string;
+};
+
+type ClawhubHealthPayload = {
+  available: boolean;
+  mode: "local" | "npx" | "unavailable";
+  command: string;
+  version?: string;
+  error?: string;
+};
+
+type ClawhubSearchResult = {
+  slug: string;
+  displayName: string;
+  summary: string;
+  owner?: string;
+  score?: number;
+  installed?: boolean;
+  latestVersion?: string;
+  updatedAt?: number;
+};
+
+type ClawhubInstallPayload = {
+  ok: boolean;
+  installed: boolean;
+  slug: string;
+  output: string;
+  error?: string;
+};
 
 function createRateLimiter(limit: number, windowMs: number): (key: string) => boolean {
   const state = new Map<string, RateState>();
@@ -163,6 +238,16 @@ function sendHtml(res: ServerResponse, html: string): void {
   res.statusCode = 200;
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.end(html);
+}
+
+function serveIndexHtml(res: ServerResponse, distDir: string, csrfToken: string): void {
+  const indexHtmlPath = join(distDir, "index.html");
+  try {
+    const indexHtml = readFileSync(indexHtmlPath, "utf-8");
+    sendHtml(res, indexHtml.replace('__CSRF_TOKEN__', csrfToken));
+  } catch {
+    sendHtml(res, "Web UI not built. Please run `bun run build:web`.");
+  }
 }
 
 const MIME_TYPES: Record<string, string> = {
@@ -328,6 +413,21 @@ export function resolveAutoStartCommand(options: {
   };
 }
 
+function launchAutoStartCommand(command: AutoStartCommand): { pid?: number; error?: string } {
+  try {
+    const child = spawn(command.cmd, command.args, {
+      cwd: command.cwd,
+      detached: true,
+      stdio: "ignore",
+      env: process.env,
+    });
+    child.unref();
+    return { pid: child.pid ?? undefined };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 export async function triggerAutoStart(
   baseDir: string,
   options: WebAutoStartOptions | undefined,
@@ -353,11 +453,23 @@ export async function triggerAutoStart(
     };
   }
 
+  const launchResult = (options.launcher ?? launchAutoStartCommand)(command);
+  if (launchResult.error) {
+    return {
+      enabled: true,
+      started: false,
+      command: command.display,
+      mode: command.mode,
+      error: launchResult.error,
+    };
+  }
+
   return {
     enabled: true,
     started: true,
     command: command.display,
     mode: command.mode,
+    pid: launchResult.pid,
   };
 }
 
@@ -402,6 +514,308 @@ function safeResolveInDist(distRoot: string, pathname: string): string | null {
   const target = resolve(distRoot, rel || "index.html");
   if (target !== distRoot && !target.startsWith(distRoot + sep)) return null;
   return target;
+}
+
+function hasBasicAgentConfig(config: Config): boolean {
+  return Boolean(config.agent.model?.trim() && config.agent.workspace?.trim());
+}
+
+function chatSessionsDir(config: Config): string {
+  return join(config.agent.workspace, "..", "sessions");
+}
+
+async function createWebChatSessionManager(config: Config): Promise<SessionManager> {
+  ensureWorkspaceDirs(config.agent.workspace);
+  return SessionManager.create(chatSessionsDir(config));
+}
+
+function isWebChatSessionId(value: string): boolean {
+  return value.startsWith("webchat:") && value.length > "webchat:".length;
+}
+
+function truncateText(value: string, limit: number): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= limit) return normalized;
+  return `${normalized.slice(0, limit).trimEnd()}…`;
+}
+
+function buildChatSessionTitle(session: Session): string {
+  const firstUserMessage = session.messages.find((message) => message.role === "user" && message.content.trim());
+  return firstUserMessage ? truncateText(firstUserMessage.content, 32) : "新会话";
+}
+
+function buildChatSessionSummary(session: Session): ChatSessionSummary {
+  const lastMessage = session.messages.at(-1);
+  return {
+    id: session.key,
+    title: buildChatSessionTitle(session),
+    createdAt: session.createdAt,
+    updatedAt: lastMessage?.timestamp || session.createdAt,
+    messageCount: session.messages.length,
+    preview: lastMessage ? truncateText(lastMessage.content, 72) : "",
+  };
+}
+
+function buildChatSessionPayload(session: Session): ChatSessionPayload {
+  return {
+    ...buildChatSessionSummary(session),
+    messages: session.messages.map((message) => ({
+      role: message.role,
+      content: message.content,
+      timestamp: message.timestamp,
+    })),
+  };
+}
+
+function closeWebChatSession(activeSessions: Map<string, WebSdkSession>, key: string): void {
+  const session = activeSessions.get(key);
+  if (!session) return;
+  activeSessions.delete(key);
+  void session.close();
+}
+
+async function getOrCreateWebChatSdkSession(
+  activeSessions: Map<string, WebSdkSession>,
+  key: string,
+  config: Config,
+  sessionManager: SessionManager,
+): Promise<WebSdkSession> {
+  const existing = activeSessions.get(key);
+  if (existing) return existing;
+
+  const history = await sessionManager.get(key);
+  const recap = history.messages.length
+    ? history.messages
+      .filter((message) => message.content)
+      .map((message) => `${message.role.toUpperCase()}: ${message.content}`)
+      .join("\n")
+    : "";
+  const recapSection = recap
+    ? `\n\n## Recent Conversation Recap\nThe session was restored from persisted web chat history.\n${recap}`
+    : "";
+  const skillManager = new SkillManager(config.agent.workspace);
+
+  const session = await createSession({
+    model: config.agent.model,
+    cwd: config.agent.workspace,
+    skills: await skillManager.getSkillPaths(),
+    providers: config.providers,
+    plugins: [
+      {
+        config() {
+          return {
+            outputStyle: "Minimal",
+            tools: { task: false, ExitPlanMode: false, AskUserQuestion: false },
+          };
+        },
+        systemPrompt(original) {
+          return recapSection ? `${original}${recapSection}` : original;
+        },
+      },
+    ],
+  });
+
+  activeSessions.set(key, session);
+  return session;
+}
+
+function writeChatStreamEvent(res: ServerResponse, event: ChatStreamEvent): void {
+  res.write(`${JSON.stringify(event)}\n`);
+}
+
+function computeCronNextRunPreview(job: CronJob): string | undefined {
+  if (!job.enabled) return undefined;
+  if (job.nextRun) return job.nextRun;
+
+  if (job.type === "every") {
+    const seconds = Number(job.schedule);
+    if (!Number.isFinite(seconds) || seconds <= 0) return undefined;
+    return new Date(Date.now() + seconds * 1000).toISOString();
+  }
+
+  if (job.type === "at") {
+    const date = new Date(String(job.schedule));
+    if (Number.isNaN(date.getTime()) || date.getTime() <= Date.now()) return undefined;
+    return date.toISOString();
+  }
+
+  try {
+    return parseExpression(String(job.schedule)).next().toISOString();
+  } catch {
+    return undefined;
+  }
+}
+
+function toCronJobPayload(job: CronJob): CronJobPayload {
+  return {
+    ...job,
+    nextRunPreview: computeCronNextRunPreview(job),
+  };
+}
+
+async function createWebCronService(baseDir: string): Promise<CronService> {
+  const config = loadConfig(baseDir);
+  ensureWorkspaceDirs(config.agent.workspace);
+  const cronService = new CronService(config.agent.workspace, new MessageBus());
+  await cronService.init();
+  return cronService;
+}
+
+function toLocalSkillPayload(detail: Awaited<ReturnType<SkillManager["getSkillDetail"]>> extends infer T ? T : never): LocalSkillPayload {
+  return {
+    name: (detail as any).name,
+    description: (detail as any).description,
+    dirName: (detail as any).dirName,
+    path: (detail as any).path,
+    relativePath: (detail as any).relativePath,
+    updatedAt: (detail as any).updatedAt,
+  };
+}
+
+function resolveClawhubCommand(): { mode: "local" | "npx" | "unavailable"; cmd: string; args: string[] } {
+  if (spawnSync("clawhub", ["--cli-version"], { encoding: "utf-8" }).status === 0) {
+    return { mode: "local", cmd: "clawhub", args: [] };
+  }
+  if (spawnSync("npx", ["--yes", "clawhub@latest", "--cli-version"], { encoding: "utf-8" }).status === 0) {
+    return { mode: "npx", cmd: "npx", args: ["--yes", "clawhub@latest"] };
+  }
+  return { mode: "unavailable", cmd: "", args: [] };
+}
+
+function runClawhub(args: string[], options?: { cwd?: string; timeoutMs?: number }): { ok: boolean; stdout: string; stderr: string; error?: string; mode: "local" | "npx" | "unavailable"; command: string } {
+  const resolved = resolveClawhubCommand();
+  if (resolved.mode === "unavailable") {
+    return {
+      ok: false,
+      stdout: "",
+      stderr: "",
+      error: "clawhub CLI unavailable; install it with `npm install -g clawhub` or rely on `npx clawhub@latest`",
+      mode: resolved.mode,
+      command: "unavailable",
+    };
+  }
+
+  const fullArgs = [...resolved.args, ...args];
+  const result = spawnSync(resolved.cmd, fullArgs, {
+    cwd: options?.cwd ?? process.cwd(),
+    encoding: "utf-8",
+    timeout: options?.timeoutMs ?? 20_000,
+    maxBuffer: 1024 * 1024,
+    env: process.env,
+  });
+
+  return {
+    ok: result.status === 0,
+    stdout: result.stdout || "",
+    stderr: result.stderr || "",
+    error: result.error ? (result.error instanceof Error ? result.error.message : String(result.error)) : undefined,
+    mode: resolved.mode,
+    command: [resolved.cmd, ...fullArgs].map(quoteShellArg).join(" "),
+  };
+}
+
+function stripClawhubProgress(output: string): string {
+  return output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("- Searching") && !line.startsWith("- Fetching") && !line.startsWith("- Resolving"))
+    .join("\n");
+}
+
+export function parseClawhubSearchOutput(output: string): Array<{ slug: string; displayName: string; score?: number }> {
+  const lines = stripClawhubProgress(output).split(/\r?\n/).filter(Boolean);
+  const results: Array<{ slug: string; displayName: string; score?: number }> = [];
+  for (const line of lines) {
+    const match = line.match(/^([a-z0-9][a-z0-9-]*)\s{2,}(.+?)(?:\s+\(([-0-9.]+)\))?$/i);
+    if (!match) continue;
+    results.push({
+      slug: match[1],
+      displayName: match[2].trim(),
+      score: match[3] ? Number(match[3]) : undefined,
+    });
+  }
+  return results;
+}
+
+function createClawhubHealthPayload(cwd: string): ClawhubHealthPayload {
+  const versionRun = runClawhub(["--cli-version"], { cwd, timeoutMs: 15_000 });
+  const version = stripClawhubProgress(versionRun.stdout).trim();
+  return {
+    available: versionRun.ok,
+    mode: versionRun.mode,
+    command: versionRun.command,
+    version: version || undefined,
+    error: versionRun.ok ? undefined : (versionRun.error || stripClawhubProgress(versionRun.stderr) || stripClawhubProgress(versionRun.stdout) || "clawhub unavailable"),
+  };
+}
+
+async function searchClawhubMarket(config: Config, query: string, limit: number): Promise<ClawhubSearchResult[]> {
+  const run = runClawhub(["search", query, "--limit", String(limit), "--workdir", config.agent.workspace, "--dir", "skills"], {
+    cwd: config.agent.workspace,
+    timeoutMs: 25_000,
+  });
+  if (!run.ok) {
+    throw new Error(run.error || stripClawhubProgress(run.stderr) || stripClawhubProgress(run.stdout) || "clawhub search failed");
+  }
+
+  const parsed = parseClawhubSearchOutput(run.stdout).slice(0, limit);
+  const skillManager = new SkillManager(config.agent.workspace);
+  const local = await skillManager.getSkillDetails();
+  const installed = new Set(local.map((skill) => skill.dirName));
+  const results: ClawhubSearchResult[] = [];
+
+  for (const item of parsed) {
+    let summary = "";
+    let owner: string | undefined;
+    let latestVersion: string | undefined;
+    let updatedAt: number | undefined;
+
+    const inspectRun = runClawhub(["inspect", item.slug, "--json", "--workdir", config.agent.workspace, "--dir", "skills"], {
+      cwd: config.agent.workspace,
+      timeoutMs: 20_000,
+    });
+    if (inspectRun.ok) {
+      const cleaned = stripClawhubProgress(inspectRun.stdout);
+      const jsonStart = cleaned.indexOf("{");
+      if (jsonStart >= 0) {
+        try {
+          const payload = JSON.parse(cleaned.slice(jsonStart)) as any;
+          summary = payload.skill?.summary || "";
+          owner = payload.owner?.handle || payload.owner?.displayName || undefined;
+          latestVersion = payload.latestVersion?.version || undefined;
+          updatedAt = payload.skill?.updatedAt;
+        } catch {}
+      }
+    }
+
+    results.push({
+      slug: item.slug,
+      displayName: item.displayName,
+      summary,
+      owner,
+      score: item.score,
+      installed: installed.has(item.slug),
+      latestVersion,
+      updatedAt,
+    });
+  }
+
+  return results;
+}
+
+async function installClawhubSkill(config: Config, slug: string): Promise<ClawhubInstallPayload> {
+  const run = runClawhub(["install", slug, "--workdir", config.agent.workspace, "--dir", "skills", "--no-input"], {
+    cwd: config.agent.workspace,
+    timeoutMs: 40_000,
+  });
+  const output = [stripClawhubProgress(run.stdout), stripClawhubProgress(run.stderr)].filter(Boolean).join("\n").trim();
+  return {
+    ok: run.ok,
+    installed: run.ok,
+    slug,
+    output,
+    error: run.ok ? undefined : (run.error || output || "clawhub install failed"),
+  };
 }
 
 function snapshotDir(baseDir: string): string {
@@ -896,10 +1310,16 @@ export async function handleWebCommand(opts: WebOptions): Promise<WebCommandResu
   let closing = false;
   let resolveClosed: (() => void) | null = null;
   let server: ReturnType<typeof createServer>;
+  const webChatSessions = new Map<string, WebSdkSession>();
+  const webChatInFlight = new Set<string>();
 
   const requestClose = () => {
     if (closing) return;
     closing = true;
+    for (const session of webChatSessions.values()) {
+      void session.close();
+    }
+    webChatSessions.clear();
     server.close(() => resolveClosed?.());
   };
 
@@ -930,24 +1350,28 @@ export async function handleWebCommand(opts: WebOptions): Promise<WebCommandResu
           sendJson(res, 429, { error: "Too many requests" });
           return;
         }
-        const indexHtmlPath = join(distDir, "index.html");
-        try {
-          const indexHtml = readFileSync(indexHtmlPath, "utf-8");
-          sendHtml(res, indexHtml.replace('__CSRF_TOKEN__', csrfToken));
-        } catch (err) {
-          sendHtml(res, "Web UI not built. Please run `bun run build:web`.");
-        }
+        serveIndexHtml(res, distDir, csrfToken);
         return;
       }
 
-      // Serve static assets for the React App
       if (!url.pathname.startsWith("/api/") && !url.pathname.startsWith("/auth/") && method === "GET") {
         const resolvedPath = safeResolveInDist(distDir, url.pathname);
         if (!resolvedPath) {
           sendJson(res, 404, { error: "Not found" });
           return;
         }
-        serveStatic(res, resolvedPath);
+
+        if (existsSync(resolvedPath) && statSync(resolvedPath).isFile()) {
+          serveStatic(res, resolvedPath);
+          return;
+        }
+
+        if (!extname(url.pathname)) {
+          serveIndexHtml(res, distDir, csrfToken);
+          return;
+        }
+
+        sendJson(res, 404, { error: "Not found" });
         return;
       }
 
@@ -1217,11 +1641,321 @@ export async function handleWebCommand(opts: WebOptions): Promise<WebCommandResu
         if (url.pathname === "/api/agent/start" && method === "POST") {
           const started = await triggerAutoStart(opts.baseDir, opts.autoStart);
           sendJson(res, started.error ? 500 : 200, started);
-          if (started.started && !started.alreadyStarted) {
-            startAgent = true;
-            setImmediate(requestClose);
+          return;
+        }
+
+        if (url.pathname === "/api/cron/jobs" && method === "GET") {
+          const cronService = await createWebCronService(opts.baseDir);
+          sendJson(res, 200, { jobs: cronService.listJobs().map(toCronJobPayload) });
+          return;
+        }
+
+        if (url.pathname === "/api/cron/jobs" && method === "POST") {
+          const body = await readJsonBody(req);
+          const type = body.type;
+          const schedule = body.schedule;
+          const message = typeof body.message === "string" ? body.message.trim() : "";
+          const channel = typeof body.channel === "string" && body.channel.trim() ? body.channel.trim() : "cli";
+          const chatId = typeof body.chatId === "string" && body.chatId.trim() ? body.chatId.trim() : channel;
+
+          if (type !== "every" && type !== "at" && type !== "cron") {
+            sendJson(res, 400, { error: "invalid cron type" });
+            return;
+          }
+          if (!message) {
+            sendJson(res, 400, { error: "message is required" });
+            return;
+          }
+
+          const cronService = await createWebCronService(opts.baseDir);
+          try {
+            const job = await cronService.addJob({
+              type,
+              schedule: type === "every" ? Number(schedule) : String(schedule ?? ""),
+              message,
+              channel,
+              chatId,
+            });
+            sendJson(res, 200, { ok: true, job: toCronJobPayload(job) });
+          } catch (error) {
+            sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) });
           }
           return;
+        }
+
+        const cronJobMatch = url.pathname.match(/^\/api\/cron\/jobs\/([^/]+)\/(pause|resume)$/);
+        if (cronJobMatch && method === "POST") {
+          const jobId = decodeURIComponent(cronJobMatch[1] || "");
+          const action = cronJobMatch[2];
+          const cronService = await createWebCronService(opts.baseDir);
+          const ok = action === "pause"
+            ? await cronService.pauseJob(jobId)
+            : await cronService.resumeJob(jobId);
+          if (!ok) {
+            sendJson(res, 404, { error: "job not found" });
+            return;
+          }
+          const job = cronService.listJobs().find((entry) => entry.id === jobId);
+          sendJson(res, 200, { ok: true, job: job ? toCronJobPayload(job) : undefined });
+          return;
+        }
+
+        const cronDeleteMatch = url.pathname.match(/^\/api\/cron\/jobs\/([^/]+)$/);
+        if (cronDeleteMatch && method === "DELETE") {
+          const jobId = decodeURIComponent(cronDeleteMatch[1] || "");
+          const cronService = await createWebCronService(opts.baseDir);
+          const ok = await cronService.removeJob(jobId);
+          if (!ok) {
+            sendJson(res, 404, { error: "job not found" });
+            return;
+          }
+          sendJson(res, 200, { ok: true });
+          return;
+        }
+
+        if (url.pathname === "/api/skills/local" && method === "GET") {
+          const config = loadConfig(opts.baseDir);
+          if (!hasBasicAgentConfig(config)) {
+            sendJson(res, 400, { error: "Agent 尚未完成基础配置" });
+            return;
+          }
+          const skillManager = new SkillManager(config.agent.workspace);
+          const skills = (await skillManager.getSkillDetails()).map((detail) => toLocalSkillPayload(detail));
+          sendJson(res, 200, { skills });
+          return;
+        }
+
+        if (url.pathname === "/api/skills/market/health" && method === "GET") {
+          const config = loadConfig(opts.baseDir);
+          if (!hasBasicAgentConfig(config)) {
+            sendJson(res, 200, createClawhubHealthPayload(process.cwd()));
+            return;
+          }
+          sendJson(res, 200, createClawhubHealthPayload(config.agent.workspace));
+          return;
+        }
+
+        if (url.pathname === "/api/skills/market/search" && method === "POST") {
+          const config = loadConfig(opts.baseDir);
+          if (!hasBasicAgentConfig(config)) {
+            sendJson(res, 400, { error: "Agent 尚未完成基础配置" });
+            return;
+          }
+          const body = await readJsonBody(req);
+          const query = typeof body.query === "string" ? body.query.trim() : "";
+          const limit = typeof body.limit === "number" ? Math.max(1, Math.min(10, Math.floor(body.limit))) : 8;
+          if (!query) {
+            sendJson(res, 400, { error: "query is required" });
+            return;
+          }
+          try {
+            const results = await searchClawhubMarket(config, query, limit);
+            sendJson(res, 200, { results });
+          } catch (error) {
+            sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) });
+          }
+          return;
+        }
+
+        if (url.pathname === "/api/skills/market/install" && method === "POST") {
+          const config = loadConfig(opts.baseDir);
+          if (!hasBasicAgentConfig(config)) {
+            sendJson(res, 400, { error: "Agent 尚未完成基础配置" });
+            return;
+          }
+          const body = await readJsonBody(req);
+          const slug = typeof body.name === "string" ? body.name.trim() : "";
+          if (!slug || !/^[a-z0-9][a-z0-9-]*$/i.test(slug)) {
+            sendJson(res, 400, { error: "invalid skill name" });
+            return;
+          }
+          const install = await installClawhubSkill(config, slug);
+          sendJson(res, install.ok ? 200 : 400, install);
+          return;
+        }
+
+        const skillDetailMatch = url.pathname.match(/^\/api\/skills\/([^/]+)$/);
+        if (skillDetailMatch) {
+          const name = decodeURIComponent(skillDetailMatch[1] || "");
+          const config = loadConfig(opts.baseDir);
+          if (!hasBasicAgentConfig(config)) {
+            sendJson(res, 400, { error: "Agent 尚未完成基础配置" });
+            return;
+          }
+          const skillManager = new SkillManager(config.agent.workspace);
+
+          if (method === "GET") {
+            const detail = await skillManager.getSkillDetail(name);
+            if (!detail) {
+              sendJson(res, 404, { error: "skill not found" });
+              return;
+            }
+            sendJson(res, 200, { skill: { ...toLocalSkillPayload(detail), content: detail.content } });
+            return;
+          }
+
+          if (method === "DELETE") {
+            const removed = await skillManager.deleteSkill(name);
+            if (!removed) {
+              sendJson(res, 404, { error: "skill not found" });
+              return;
+            }
+            sendJson(res, 200, { ok: true });
+            return;
+          }
+        }
+
+        if (url.pathname === "/api/chat/sessions" && method === "GET") {
+          const config = loadConfig(opts.baseDir);
+          if (!hasBasicAgentConfig(config)) {
+            sendJson(res, 400, { error: "Agent 尚未完成基础配置" });
+            return;
+          }
+
+          const sessionManager = await createWebChatSessionManager(config);
+          const sessions = (await sessionManager.list())
+            .filter((session) => isWebChatSessionId(session.key))
+            .map((session) => buildChatSessionSummary(session));
+          sendJson(res, 200, { sessions });
+          return;
+        }
+
+        if (url.pathname === "/api/chat/sessions" && method === "POST") {
+          const config = loadConfig(opts.baseDir);
+          if (!hasBasicAgentConfig(config)) {
+            sendJson(res, 400, { error: "Agent 尚未完成基础配置" });
+            return;
+          }
+
+          const sessionManager = await createWebChatSessionManager(config);
+          const id = `webchat:${randomUUID()}`;
+          await sessionManager.clear(id);
+          const session = await sessionManager.get(id);
+          sendJson(res, 200, { session: buildChatSessionPayload(session) });
+          return;
+        }
+
+        const chatSessionMatch = url.pathname.match(/^\/api\/chat\/sessions\/([^/]+)(?:\/(messages|clear))?$/);
+        if (chatSessionMatch) {
+          const sessionId = decodeURIComponent(chatSessionMatch[1] || "");
+          const action = chatSessionMatch[2] || "";
+
+          if (!isWebChatSessionId(sessionId)) {
+            sendJson(res, 400, { error: "invalid web chat session id" });
+            return;
+          }
+
+          const config = loadConfig(opts.baseDir);
+          if (!hasBasicAgentConfig(config)) {
+            sendJson(res, 400, { error: "Agent 尚未完成基础配置" });
+            return;
+          }
+
+          const sessionManager = await createWebChatSessionManager(config);
+          const exists = await sessionManager.exists(sessionId);
+
+          if (!exists && !(method === "POST" && action === "messages")) {
+            sendJson(res, 404, { error: "session not found" });
+            return;
+          }
+
+          if (method === "GET" && !action) {
+            const session = await sessionManager.get(sessionId);
+            sendJson(res, 200, { session: buildChatSessionPayload(session) });
+            return;
+          }
+
+          if (method === "POST" && action === "clear") {
+            await sessionManager.clear(sessionId);
+            closeWebChatSession(webChatSessions, sessionId);
+            const session = await sessionManager.get(sessionId);
+            sendJson(res, 200, { ok: true, session: buildChatSessionPayload(session) });
+            return;
+          }
+
+          if (method === "DELETE" && !action) {
+            await sessionManager.delete(sessionId);
+            closeWebChatSession(webChatSessions, sessionId);
+            sendJson(res, 200, { ok: true });
+            return;
+          }
+
+          if (method === "POST" && action === "messages") {
+            const body = await readJsonBody(req);
+            const message = typeof body.message === "string" ? body.message.trim() : "";
+            if (!message) {
+              sendJson(res, 400, { error: "message is required" });
+              return;
+            }
+            if (webChatInFlight.has(sessionId)) {
+              sendJson(res, 409, { error: "session is busy" });
+              return;
+            }
+
+            webChatInFlight.add(sessionId);
+            setSecurityHeaders(res);
+            res.statusCode = 200;
+            res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+            res.setHeader("Cache-Control", "no-store");
+            res.setHeader("X-Accel-Buffering", "no");
+
+            try {
+              const skillManager = new SkillManager(config.agent.workspace);
+              const resolvedMessage = await skillManager.resolveSkillCommand(message) ?? message;
+              await sessionManager.append(sessionId, "user", message);
+              const sdkSession = await getOrCreateWebChatSdkSession(webChatSessions, sessionId, config, sessionManager);
+              await sdkSession.send(resolvedMessage);
+
+              let streamedContent = "";
+              let finalContent = "";
+              let isError = false;
+
+              for await (const event of sdkSession.receive()) {
+                if (event.type === "message" && "role" in event && event.role === "assistant") {
+                  if (Array.isArray(event.content)) {
+                    for (const part of event.content) {
+                      if (part.type === "text" && part.text) {
+                        streamedContent += part.text;
+                        writeChatStreamEvent(res, { type: "delta", delta: part.text });
+                      }
+                    }
+                  } else {
+                    const text = event.text || (typeof event.content === "string" ? event.content : "");
+                    if (text) {
+                      streamedContent += text;
+                      writeChatStreamEvent(res, { type: "delta", delta: text });
+                    }
+                  }
+                } else if (event.type === "result") {
+                  finalContent = event.content || streamedContent;
+                  isError = !!event.isError;
+                }
+              }
+
+              const assistantContent = finalContent || streamedContent;
+              if (isError) throw new Error(assistantContent || "chat stream failed");
+
+              await sessionManager.append(sessionId, "assistant", assistantContent);
+              const session = await sessionManager.get(sessionId);
+              writeChatStreamEvent(res, {
+                type: "done",
+                message: {
+                  role: "assistant",
+                  content: assistantContent,
+                  timestamp: session.messages.at(-1)?.timestamp || new Date().toISOString(),
+                },
+                session: buildChatSessionSummary(session),
+              });
+              res.end();
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error);
+              writeChatStreamEvent(res, { type: "error", error: message });
+              res.end();
+            } finally {
+              webChatInFlight.delete(sessionId);
+            }
+            return;
+          }
         }
 
         if (url.pathname === "/api/chat/test" && method === "POST") {

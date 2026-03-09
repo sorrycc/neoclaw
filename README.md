@@ -15,6 +15,7 @@ A multi-channel AI agent built with [Neovate Code](https://github.com/neovate-co
 - **Profiles** — multiple isolated configurations via `--profile`
 - **Hot reload** — config changes apply without restart
 - **Heartbeat** — built-in health monitoring
+- **Web admin console** — Dashboard, Chat, Config, Cron, and Skills management
 
 ## Install
 
@@ -88,6 +89,23 @@ Web panel supports:
 - Runtime read-only status (`/api/runtime-status`) with recent errors
 - Config export/import (`/api/config/export`, `/api/config/import`)
 - Auto snapshot before import + rollback from snapshots (`/api/config/snapshots`, `/api/config/rollback`)
+
+
+## Web Admin Console
+
+The Web console now includes:
+
+- `Dashboard` — runtime, config, cron, skill, and error summaries
+- `Chat` — persistent Web Chat with session management
+- `Config` — the single configuration center
+- `Cron` — create/pause/resume/delete scheduled jobs
+- `Skills` — local skill management plus `clawhub` market search/install
+
+Useful docs:
+
+- `CHANGELOG.md`
+- `docs/2026-03-07-web-admin-console-validation.md`
+- `docs/designs/2026-03-07-web-admin-console-v1-design.md`
 
 ## Configuration
 

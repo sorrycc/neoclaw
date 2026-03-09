@@ -17,6 +17,7 @@ import {
   readSnapshotConfig,
   resolveAutoStartCommand,
   triggerAutoStart,
+  parseClawhubSearchOutput,
 } from "../web.js";
 
 const tmpDirs: string[] = [];
@@ -318,6 +319,19 @@ describe("web command helpers", () => {
     expect(resolved).toBe(distWeb);
   });
 
+
+  it("parses clawhub search text output", () => {
+    const parsed = parseClawhubSearchOutput(`- Searching
+markdown-formatter  Markdown Formatter  (3.607)
+markdown  Markdown  (3.534)
+`);
+
+    expect(parsed).toEqual([
+      { slug: "markdown-formatter", displayName: "Markdown Formatter", score: 3.607 },
+      { slug: "markdown", displayName: "Markdown", score: 3.534 },
+    ]);
+  });
+
   it("installs web deps before building when tooling is missing", () => {
     const projectRoot = createTempProjectRoot("install-first");
     const distWeb = join(projectRoot, "dist", "web");
@@ -378,20 +392,29 @@ describe("web command helpers", () => {
     });
   });
 
-  it("requests transition into the main agent when not already running", async () => {
+  it("launches the main agent when not already running", async () => {
     const baseDir = join("/tmp", `neoclaw-auto-start-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    const launched: Array<{ cmd: string; args: string[]; cwd: string }> = [];
 
     const first = await triggerAutoStart(baseDir, {
       enabled: true,
       startArgs: ["--profile", "demo"],
       cwd: "/tmp/neoclaw-shell",
       useBunRuntime: false,
+      launcher: (command) => {
+        launched.push({ cmd: command.cmd, args: command.args, cwd: command.cwd });
+        return { pid: 43210 };
+      },
     });
 
+    expect(launched).toEqual([
+      { cmd: "neoclaw", args: ["--profile", "demo"], cwd: "/tmp/neoclaw-shell" },
+    ]);
     expect(first).toMatchObject({
       enabled: true,
       started: true,
       command: "neoclaw --profile demo",
+      pid: 43210,
     });
   });
 
