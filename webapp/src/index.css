@@ -27,14 +27,18 @@ body {
   min-height: 100vh;
   display: flex;
   justify-content: center;
-  align-items: center;
+  align-items: flex-start;
   -webkit-font-smoothing: antialiased;
 }
 
 #root {
   width: 100%;
-  max-width: 900px;
+  max-width: 960px;
   padding: 2rem;
+}
+
+.onboarding-shell {
+  min-width: 0;
 }
 
 .auth-container {
@@ -352,4 +356,330 @@ p.subtitle {
   border-color: var(--primary);
   color: var(--primary);
   background: rgba(79, 70, 229, 0.08);
+}
+
+.view-toggle {
+  display: inline-flex;
+  gap: 0.5rem;
+  padding: 0.35rem;
+  border-radius: 999px;
+  background: #eef2ff;
+  margin: 0 auto 2rem;
+}
+
+.view-toggle-btn {
+  border: none;
+  background: transparent;
+  color: #475569;
+  border-radius: 999px;
+  padding: 0.65rem 1rem;
+  font-size: 0.92rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.view-toggle-btn:hover {
+  color: var(--text-main);
+}
+
+.view-toggle-btn.active {
+  background: #ffffff;
+  color: var(--primary);
+  box-shadow: 0 8px 16px -14px rgba(79, 70, 229, 0.55);
+}
+
+.config-management-shell {
+  margin-top: 0.5rem;
+}
+
+.config-management-card {
+  margin-bottom: 0;
+  padding: 1.25rem;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  text-align: left;
+}
+
+.config-management-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-bottom: 0.75rem;
+}
+
+.config-management-title {
+  font-size: 1.05rem;
+  margin-bottom: 0.35rem;
+}
+
+.config-management-subtitle {
+  color: var(--text-muted);
+  font-size: 0.92rem;
+}
+
+.config-management-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.config-management-meta {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  color: #475569;
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+}
+
+.config-feedback {
+  margin-bottom: 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+}
+
+.config-feedback-error {
+  background: #fee2e2;
+}
+
+.config-feedback-success {
+  background: #dcfce7;
+}
+
+.config-section {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #ffffff;
+  margin-top: 1rem;
+  overflow: hidden;
+}
+
+.config-section-summary {
+  list-style: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  cursor: pointer;
+}
+
+.config-section-summary::-webkit-details-marker {
+  display: none;
+}
+
+.config-section-summary strong {
+  display: block;
+  font-size: 0.98rem;
+}
+
+.config-section-summary span {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
+.config-section-body {
+  padding: 0 1rem 1rem;
+}
+
+
+.config-snapshot-empty {
+  color: var(--text-muted);
+  font-size: 0.92rem;
+  padding: 1rem 0;
+}
+
+.config-snapshot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-height: 480px;
+  overflow: auto;
+  padding-right: 0.15rem;
+}
+
+.config-snapshot-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fff;
+  padding: 0.9rem 1rem;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.config-snapshot-item:hover:not(:disabled) {
+  border-color: #c7d2fe;
+  box-shadow: 0 6px 16px -12px rgba(79, 70, 229, 0.4);
+  transform: translateY(-1px);
+}
+
+.config-snapshot-item:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.config-snapshot-main,
+.config-snapshot-side {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.config-snapshot-main span,
+.config-snapshot-side span {
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
+.config-snapshot-side {
+  align-items: flex-end;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  z-index: 999;
+}
+
+.modal-card {
+  width: min(980px, 100%);
+  max-height: calc(100vh - 3rem);
+  overflow: auto;
+  background: white;
+  border-radius: 18px;
+  padding: 1.5rem;
+  box-shadow: 0 24px 48px -24px rgba(15, 23, 42, 0.45);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  text-align: left;
+}
+
+.modal-header h3 {
+  font-size: 1.2rem;
+  margin-bottom: 0.35rem;
+}
+
+.modal-header p {
+  color: var(--text-muted);
+  font-size: 0.92rem;
+}
+
+.modal-meta-grid,
+.modal-content-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.modal-meta-grid {
+  margin-bottom: 1rem;
+}
+
+.modal-meta-item,
+.modal-panel {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #f8fafc;
+  padding: 1rem;
+  text-align: left;
+}
+
+.modal-meta-item span,
+.modal-panel h4 {
+  display: block;
+  color: #64748b;
+  font-size: 0.85rem;
+  margin-bottom: 0.45rem;
+}
+
+.modal-meta-item strong {
+  word-break: break-word;
+}
+
+.config-path-list {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.config-path-chip,
+.config-more-paths {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.35rem 0.55rem;
+  border-radius: 999px;
+  background: #e2e8f0;
+  font-size: 0.8rem;
+  color: #0f172a;
+}
+
+.config-preview-json {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 10px;
+  padding: 1rem;
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
+@media (max-width: 768px) {
+  #root {
+    padding: 1rem;
+  }
+
+  .glass-card {
+    padding: 1.5rem;
+  }
+
+  .view-toggle {
+    display: flex;
+    width: 100%;
+  }
+
+  .view-toggle-btn {
+    flex: 1;
+  }
+
+  .config-management-header,
+  .config-snapshot-panel-header,
+  .modal-header,
+  .modal-meta-grid,
+  .modal-content-grid {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+
+  .config-snapshot-item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .config-snapshot-side {
+    align-items: flex-start;
+  }
 }

@@ -31,6 +31,10 @@ neoclaw onboard
 # Or start from onboarding flow and open web panel directly
 neoclaw onboard --mode web
 
+# In web onboarding mode, save config first,
+# then click Start Agent in the UI.
+# It will choose `neoclaw` or `bun run start` automatically.
+
 # Edit config
 # ~/.neoclaw/config.json
 
