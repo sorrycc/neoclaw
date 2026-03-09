@@ -73,8 +73,9 @@ export class NeovateAgent implements Agent {
   async *processMessage(msg: InboundMessage): AsyncGenerator<OutboundMessage> {
     const key = sessionKey(msg);
     const { channel: outChannel, chatId: outChatId } = replyTarget(msg);
+    const sourceMessageId = typeof msg.metadata.sourceMessageId === "string" ? msg.metadata.sourceMessageId : undefined;
     const reply = (content: string, progress = false): OutboundMessage => ({
-      channel: outChannel, chatId: outChatId, content, media: [], metadata: { progress },
+      channel: outChannel, chatId: outChatId, content, replyTo: sourceMessageId, media: [], metadata: { progress },
     });
 
     const commandResult = yield* this.handleCommand(msg, key, reply);
@@ -110,7 +111,7 @@ export class NeovateAgent implements Agent {
     const media = mediaQueue.drain();
     if (finalContent || media.length > 0) {
       logger.debug("agent", `yield: final content=${JSON.stringify(finalContent).slice(0, 80)} media=${media.length}`);
-      yield { channel: outChannel, chatId: outChatId, content: finalContent, media, metadata: { progress: false } };
+      yield { channel: outChannel, chatId: outChatId, content: finalContent, replyTo: sourceMessageId, media, metadata: { progress: false } };
     }
   }
 

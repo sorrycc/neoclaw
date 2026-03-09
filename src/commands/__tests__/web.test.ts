@@ -84,6 +84,7 @@ describe("web command helpers", () => {
         cli: { enabled: true },
         dingtalk: { enabled: false, clientId: "", clientSecret: "", robotCode: "", allowFrom: [] },
         feishu: { enabled: true, appId: "cli_1", appSecret: "sec_1", allowFrom: [], connectionMode: "websocket" },
+        qq: { enabled: false, appId: "", clientSecret: "", allowFrom: [], requireMention: true },
       },
       logLevel: "debug",
     } as Config;

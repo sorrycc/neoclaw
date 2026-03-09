@@ -7,9 +7,10 @@ import { TelegramChannel } from "./telegram.js";
 import { CLIChannel } from "./cli.js";
 import { DingtalkChannel } from "./dingtalk.js";
 import { FeishuChannel } from "./feishu.js";
+import { QQChannel } from "./qq.js";
 import type { RuntimeStatusStore } from "../runtime/status-store.js";
 
-const CHANNEL_KEYS: ChannelName[] = ["cli", "telegram", "dingtalk", "feishu"];
+const CHANNEL_KEYS: ChannelName[] = ["cli", "telegram", "dingtalk", "feishu", "qq"];
 
 export class ChannelManager {
   private channels = new Map<string, Channel>();
@@ -32,6 +33,9 @@ export class ChannelManager {
     }
     if (config.channels.feishu.enabled) {
       this.channels.set("feishu", new FeishuChannel(config.channels.feishu, bus));
+    }
+    if (config.channels.qq.enabled) {
+      this.channels.set("qq", new QQChannel(config.channels.qq, bus));
     }
   }
 
@@ -94,6 +98,20 @@ export class ChannelManager {
     } else if (newConfig.channels.feishu.enabled && this.channels.has("feishu")) {
       this.channels.get("feishu")!.updateConfig?.(newConfig.channels.feishu);
     }
+
+    // QQ
+    if (newConfig.channels.qq.enabled && !this.channels.has("qq")) {
+      const qq = new QQChannel(newConfig.channels.qq, this.bus);
+      this.channels.set("qq", qq);
+      if (this.running) {
+        void this.startChannel("qq", qq).catch((err) => logger.error("dispatch", "failed to start QQ channel:", err));
+      }
+    } else if (!newConfig.channels.qq.enabled && this.channels.has("qq")) {
+      await this.stopChannel("qq", this.channels.get("qq")!);
+      this.channels.delete("qq");
+    } else if (newConfig.channels.qq.enabled && this.channels.has("qq")) {
+      this.channels.get("qq")!.updateConfig?.(newConfig.channels.qq);
+    }
   }
 
   async startAll(): Promise<void> {
@@ -137,6 +155,7 @@ export class ChannelManager {
     this.statusStore?.markChannelConfigured("telegram", config.channels.telegram.enabled);
     this.statusStore?.markChannelConfigured("dingtalk", config.channels.dingtalk.enabled);
     this.statusStore?.markChannelConfigured("feishu", config.channels.feishu.enabled);
+    this.statusStore?.markChannelConfigured("qq", config.channels.qq.enabled);
     for (const name of CHANNEL_KEYS) {
       if (!this.channels.has(name)) {
         this.statusStore?.markChannelRunning(name, false);

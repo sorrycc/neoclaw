@@ -100,6 +100,7 @@ export default function App() {
       cli: { enabled: true },
       dingtalk: { enabled: false, clientId: '', clientSecret: '', robotCode: '', corpId: '', allowFrom: '', keepAlive: false },
       feishu: { enabled: false, appId: '', appSecret: '', allowFrom: '', domain: 'feishu', connectionMode: 'websocket', verificationToken: '' },
+      qq: { enabled: false, appId: '', clientSecret: '', allowFrom: '', requireMention: true, apiBase: 'https://api.sgroup.qq.com', wsIntentMask: (1 << 30) | (1 << 12) | (1 << 25) },
     },
     providers: {},
     logLevel: 'info',
@@ -236,15 +237,31 @@ export default function App() {
 
   const loadSnapshots = async () => {
     try {
-      setSnapshotsLoading(true);
-      const res = await api<SnapshotListResponse>('/api/config/snapshots');
-      setSnapshots(res.snapshots || []);
-    } catch (err: any) {
-      setManagementError(err.message || t('configManagementLoadFailed'));
-    } finally {
-      setSnapshotsLoading(false);
-    }
-  };
+      const { config } = await api('/api/config/current');
+
+      setConfigDraft((prev: any) => ({
+        ...prev,
+        agent: { ...prev.agent, ...config.agent },
+        channels: {
+          telegram: { ...config.channels?.telegram, allowFrom: config.channels?.telegram?.allowFrom?.join(',') || '' },
+          cli: { ...config.channels?.cli },
+          dingtalk: { ...config.channels?.dingtalk, allowFrom: config.channels?.dingtalk?.allowFrom?.join(',') || '' },
+          feishu: {
+            ...config.channels?.feishu,
+            allowFrom: config.channels?.feishu?.allowFrom?.join(',') || '',
+            domain: config.channels?.feishu?.domain || 'feishu',
+            connectionMode: config.channels?.feishu?.connectionMode || 'websocket',
+          },
+          qq: {
+            ...config.channels?.qq,
+            allowFrom: config.channels?.qq?.allowFrom?.join(',') || '',
+            apiBase: config.channels?.qq?.apiBase || 'https://api.sgroup.qq.com',
+            wsIntentMask: config.channels?.qq?.wsIntentMask || ((1 << 30) | (1 << 12) | (1 << 25)),
+          },
+        },
+        providers: config.providers || {},
+        logLevel: config.logLevel || 'info',
+      }));
 
   const checkContext = async () => {
     try {
@@ -1046,6 +1063,66 @@ export default function App() {
                     <input type="text" className="form-input" value={configDraft.channels.feishu.verificationToken || ''} onChange={(e) => setConfigDraft({ ...configDraft, channels: { ...configDraft.channels, feishu: { ...configDraft.channels.feishu, verificationToken: e.target.value } } })} />
                   </div>
                 )}
+              </div>
+            )}
+
+            <label className="checkbox-label" style={{ marginBottom: '1rem' }}>
+              <input type="checkbox" checked={configDraft.channels.qq.enabled} onChange={(e) => setConfigDraft({ ...configDraft, channels: { ...configDraft.channels, qq: { ...configDraft.channels.qq, enabled: e.target.checked } } })} />
+              {t('enableQQ')}
+            </label>
+
+            {configDraft.channels.qq.enabled && (
+              <div className="advanced-panel fade-in">
+                <p style={{ color: '#64748b', marginBottom: '1rem', lineHeight: 1.6, fontSize: '0.95rem' }}>{t('qqSetupHint')}</p>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div className="form-group">
+                    <label className="form-label">{t('qqAppId')}</label>
+                    <input type="text" placeholder={t('qqAppIdPlaceholder')} className="form-input" value={configDraft.channels.qq.appId} onChange={(e) => setConfigDraft({ ...configDraft, channels: { ...configDraft.channels, qq: { ...configDraft.channels.qq, appId: e.target.value } } })} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">{t('qqClientSecret')}</label>
+                    <input type="password" placeholder={t('qqClientSecretPlaceholder')} className="form-input" value={configDraft.channels.qq.clientSecret} onChange={(e) => setConfigDraft({ ...configDraft, channels: { ...configDraft.channels, qq: { ...configDraft.channels.qq, clientSecret: e.target.value } } })} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">{t('allowedUserIds')}</label>
+                    <input type="text" placeholder={t('qqAllowFromPlaceholder')} className="form-input" value={configDraft.channels.qq.allowFrom} onChange={(e) => setConfigDraft({ ...configDraft, channels: { ...configDraft.channels, qq: { ...configDraft.channels.qq, allowFrom: e.target.value } } })} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">{t('qqApiBase')}</label>
+                    <input type="text" placeholder={t('qqApiBasePlaceholder')} className="form-input" value={configDraft.channels.qq.apiBase || ''} onChange={(e) => setConfigDraft({ ...configDraft, channels: { ...configDraft.channels, qq: { ...configDraft.channels.qq, apiBase: e.target.value } } })} />
+                  </div>
+                  <div className="form-group">
+                    <label className="checkbox-label">
+                      <input type="checkbox" checked={configDraft.channels.qq.requireMention !== false} onChange={(e) => setConfigDraft({ ...configDraft, channels: { ...configDraft.channels, qq: { ...configDraft.channels.qq, requireMention: e.target.checked } } })} />
+                      {t('qqRequireMention')}
+                    </label>
+                    <div style={{ color: '#94a3b8', fontSize: '0.85rem', marginTop: '0.35rem' }}>{t('qqRequireMentionHint')}</div>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">{t('qqIntentMask')}</label>
+                    <input type="number" placeholder={t('qqIntentMaskPlaceholder')} className="form-input" value={configDraft.channels.qq.wsIntentMask || 0} onChange={(e) => setConfigDraft({ ...configDraft, channels: { ...configDraft.channels, qq: { ...configDraft.channels.qq, wsIntentMask: parseInt(e.target.value || '0', 10) } } })} />
+                    <div style={{ color: '#94a3b8', fontSize: '0.85rem', marginTop: '0.35rem' }}>{t('qqIntentMaskHint')}</div>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">{t('qqReconnectBaseMs')}</label>
+                    <input type="number" placeholder="1000" className="form-input" value={configDraft.channels.qq.wsReconnectBaseMs || 1000} onChange={(e) => setConfigDraft({ ...configDraft, channels: { ...configDraft.channels, qq: { ...configDraft.channels.qq, wsReconnectBaseMs: parseInt(e.target.value || '0', 10) } } })} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">{t('qqReconnectMaxMs')}</label>
+                    <input type="number" placeholder="30000" className="form-input" value={configDraft.channels.qq.wsReconnectMaxMs || 30000} onChange={(e) => setConfigDraft({ ...configDraft, channels: { ...configDraft.channels, qq: { ...configDraft.channels.qq, wsReconnectMaxMs: parseInt(e.target.value || '0', 10) } } })} />
+                  </div>
+                  <div className="form-group">
+                    <label className="checkbox-label">
+                      <input type="checkbox" checked={configDraft.channels.qq.dedupPersist === true} onChange={(e) => setConfigDraft({ ...configDraft, channels: { ...configDraft.channels, qq: { ...configDraft.channels.qq, dedupPersist: e.target.checked } } })} />
+                      {t('qqDedupPersist')}
+                    </label>
+                    <div style={{ color: '#94a3b8', fontSize: '0.85rem', marginTop: '0.35rem' }}>{t('qqDedupPersistHint')}</div>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">{t('qqDedupFile')}</label>
+                    <input type="text" placeholder={t('qqDedupFilePlaceholder')} className="form-input" value={configDraft.channels.qq.dedupFile || ''} onChange={(e) => setConfigDraft({ ...configDraft, channels: { ...configDraft.channels, qq: { ...configDraft.channels.qq, dedupFile: e.target.value } } })} />
+                  </div>
+                </div>
               </div>
             )}
 

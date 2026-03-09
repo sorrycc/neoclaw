@@ -533,6 +533,10 @@ function mergeImportedConfig(current: Config, incoming: unknown): Config {
         ...current.channels.feishu,
         ...((channelsRaw.feishu as Partial<Config["channels"]["feishu"]>) || {}),
       },
+      qq: {
+        ...current.channels.qq,
+        ...((channelsRaw.qq as Partial<Config["channels"]["qq"]>) || {}),
+      },
     },
     providers:
       payload.providers !== undefined
@@ -696,6 +700,7 @@ function maskConfig(config: Config): Config {
   if (clone.channels.telegram.token) clone.channels.telegram.token = "********";
   if (clone.channels.dingtalk.clientSecret) clone.channels.dingtalk.clientSecret = "********";
   if (clone.channels.feishu.appSecret) clone.channels.feishu.appSecret = "********";
+  if (clone.channels.qq.clientSecret) clone.channels.qq.clientSecret = "********";
   if (clone.agent.memorySearch) delete clone.agent.memorySearch;
   if (clone.agent.memoryFlush) delete clone.agent.memoryFlush;
   return clone;
@@ -727,6 +732,7 @@ function normalizeIncomingConfig(body: JsonBody, baseDir: string): Config {
   const cli = (channels.cli ?? {}) as JsonBody;
   const dingtalk = (channels.dingtalk ?? {}) as JsonBody;
   const feishu = (channels.feishu ?? {}) as JsonBody;
+  const qq = (channels.qq ?? {}) as JsonBody;
 
   if (typeof agent.model === "string") next.agent.model = agent.model.trim();
   if (typeof agent.codeModel === "string") next.agent.codeModel = agent.codeModel.trim();
@@ -809,6 +815,29 @@ function normalizeIncomingConfig(body: JsonBody, baseDir: string): Config {
   if (typeof feishu.dedupPersist === "boolean") next.channels.feishu.dedupPersist = feishu.dedupPersist;
   if (typeof feishu.dedupFile === "string") next.channels.feishu.dedupFile = feishu.dedupFile.trim();
 
+  if (typeof qq.enabled === "boolean") next.channels.qq.enabled = qq.enabled;
+  if (typeof qq.appId === "string") next.channels.qq.appId = qq.appId.trim();
+  if (typeof qq.clientSecret === "string" && qq.clientSecret.trim() && qq.clientSecret.trim() !== "********") {
+    next.channels.qq.clientSecret = qq.clientSecret.trim();
+  }
+  if (qq.allowFrom !== undefined) next.channels.qq.allowFrom = parseStringArray(qq.allowFrom);
+  if (typeof qq.requireMention === "boolean") next.channels.qq.requireMention = qq.requireMention;
+  if (typeof qq.apiBase === "string") next.channels.qq.apiBase = qq.apiBase.trim();
+  if (typeof qq.wsIntentMask === "number") {
+    const n = Math.floor(qq.wsIntentMask);
+    if (Number.isFinite(n) && n > 0) next.channels.qq.wsIntentMask = n;
+  }
+  if (typeof qq.wsReconnectBaseMs === "number") {
+    const n = Math.floor(qq.wsReconnectBaseMs);
+    if (Number.isFinite(n) && n > 0) next.channels.qq.wsReconnectBaseMs = n;
+  }
+  if (typeof qq.wsReconnectMaxMs === "number") {
+    const n = Math.floor(qq.wsReconnectMaxMs);
+    if (Number.isFinite(n) && n > 0) next.channels.qq.wsReconnectMaxMs = n;
+  }
+  if (typeof qq.dedupPersist === "boolean") next.channels.qq.dedupPersist = qq.dedupPersist;
+  if (typeof qq.dedupFile === "string") next.channels.qq.dedupFile = qq.dedupFile.trim();
+
   if (body.providers !== undefined && typeof body.providers === "object" && body.providers && !Array.isArray(body.providers)) {
     next.providers = body.providers as Config["providers"];
   }
@@ -839,6 +868,11 @@ function validateConfig(config: Config): string[] {
     if (mode === "webhook" && !config.channels.feishu.verificationToken) {
       errs.push("Feishu 在 webhook 模式下必须设置 verificationToken");
     }
+  }
+  if (config.channels.qq.enabled) {
+    if (!config.channels.qq.appId) errs.push("QQ 启用时必须设置 appId");
+    if (!config.channels.qq.clientSecret) errs.push("QQ 启用时必须设置 clientSecret");
+    if ((config.channels.qq.wsIntentMask || 0) <= 0) errs.push("QQ wsIntentMask 必须是正整数");
   }
   return errs;
 }

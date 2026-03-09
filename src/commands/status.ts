@@ -37,6 +37,11 @@ export function handleStatusCommand(config: Config, cron: CronService, baseDir: 
     ? `✓ enabled (appId: ${fs.appId ? fs.appId.slice(0, 10) + "..." : "not set"}, mode: ${fsMode}, mention: ${fs.requireMention !== false ? "on" : "off"}, allowFrom: ${fs.allowFrom.length}${webhookInfo}${fsGuardInfo}${fsDedupInfo})`
     : "✗ disabled";
   lines.push(`  Feishu:   ${fsInfo}`);
+  const qq = config.channels.qq;
+  const qqInfo = qq.enabled
+    ? `✓ enabled (appId: ${qq.appId ? qq.appId.slice(0, 10) + "..." : "not set"}, mention: ${qq.requireMention !== false ? "on" : "off"}, allowFrom: ${qq.allowFrom.length}, intents: ${qq.wsIntentMask || 0}, dedup: memory${qq.dedupPersist ? "+disk" : ""})`
+    : "✗ disabled";
+  lines.push(`  QQ:       ${qqInfo}`);
   lines.push("");
 
   const jobs = cron.listJobs();
