@@ -1,10 +1,18 @@
-import { join } from "path";
-import { readdir, stat, readFile, access } from "fs/promises";
+import { join, relative } from "path";
+import { readdir, stat, readFile, access, rm } from "fs/promises";
 import matter from "gray-matter";
 
 export interface SkillInfo {
   name: string;
   description: string;
+}
+
+export interface SkillDetail extends SkillInfo {
+  dirName: string;
+  path: string;
+  relativePath: string;
+  content: string;
+  updatedAt: string;
 }
 
 export class SkillManager {
@@ -14,32 +22,71 @@ export class SkillManager {
     return join(this.workspace, "skills");
   }
 
+  private async readSkillDetail(dirName: string): Promise<SkillDetail | null> {
+    const skillPath = join(this.skillsDir, dirName);
+    const skillFile = join(skillPath, "SKILL.md");
+
+    try {
+      const skillStat = await stat(skillPath);
+      if (!skillStat.isDirectory()) return null;
+      await access(skillFile);
+      const fileStat = await stat(skillFile);
+      const raw = await readFile(skillFile, "utf-8");
+      const { data, content } = matter(raw);
+      return {
+        dirName,
+        name: String(data.name ?? dirName),
+        description: String(data.description ?? ""),
+        path: skillFile,
+        relativePath: relative(this.workspace, skillFile),
+        content: content.trim(),
+        updatedAt: fileStat.mtime.toISOString(),
+      };
+    } catch {
+      return null;
+    }
+  }
+
   async getSkills(): Promise<SkillInfo[]> {
+    return (await this.getSkillDetails()).map(({ name, description }) => ({ name, description }));
+  }
+
+  async getSkillDetails(): Promise<SkillDetail[]> {
     try {
       await access(this.skillsDir);
     } catch {
       return [];
     }
+
     const entries = await readdir(this.skillsDir);
-    const skills: SkillInfo[] = [];
+    const details: SkillDetail[] = [];
     for (const entry of entries) {
-      const skillPath = join(this.skillsDir, entry);
-      const s = await stat(skillPath);
-      if (!s.isDirectory()) continue;
-      const skillFile = join(skillPath, "SKILL.md");
-      try {
-        await access(skillFile);
-      } catch {
-        continue;
-      }
-      const raw = await readFile(skillFile, "utf-8");
-      const { data } = matter(raw);
-      skills.push({
-        name: data.name ?? entry,
-        description: data.description ?? "",
-      });
+      const detail = await this.readSkillDetail(entry);
+      if (detail) details.push(detail);
     }
-    return skills;
+    return details.sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  async getSkillDetail(nameOrDir: string): Promise<SkillDetail | null> {
+    const trimmed = nameOrDir.trim();
+    if (!trimmed) return null;
+
+    const byDir = await this.readSkillDetail(trimmed);
+    if (byDir) return byDir;
+
+    const details = await this.getSkillDetails();
+    return details.find((detail) => detail.name === trimmed) ?? null;
+  }
+
+  async deleteSkill(nameOrDir: string): Promise<boolean> {
+    const detail = await this.getSkillDetail(nameOrDir);
+    if (!detail) return false;
+    await rm(join(this.skillsDir, detail.dirName), { recursive: true, force: true });
+    return true;
+  }
+
+  async hasSkill(nameOrDir: string): Promise<boolean> {
+    return Boolean(await this.getSkillDetail(nameOrDir));
   }
 
   async getSkillNames(): Promise<string[]> {
@@ -47,23 +94,7 @@ export class SkillManager {
   }
 
   async getSkillPaths(): Promise<string[]> {
-    try {
-      await access(this.skillsDir);
-    } catch {
-      return [];
-    }
-    const paths: string[] = [];
-    const entries = await readdir(this.skillsDir);
-    for (const name of entries) {
-      const skillFile = join(this.skillsDir, name, "SKILL.md");
-      try {
-        await access(skillFile);
-        paths.push(skillFile);
-      } catch {
-        // no SKILL.md, skip
-      }
-    }
-    return paths;
+    return (await this.getSkillDetails()).map((detail) => detail.path);
   }
 
   async resolveSkillCommand(content: string): Promise<string | null> {
@@ -71,27 +102,22 @@ export class SkillManager {
     const spaceIdx = content.indexOf(" ");
     const command = spaceIdx === -1 ? content.slice(1) : content.slice(1, spaceIdx);
     const args = spaceIdx === -1 ? "" : content.slice(spaceIdx + 1).trim();
-    const skillDir = join(this.skillsDir, command);
-    const skillFile = join(skillDir, "SKILL.md");
-    try {
-      await access(skillFile);
-    } catch {
-      return null;
-    }
-    const raw = await readFile(skillFile, "utf-8");
-    const { content: body } = matter(raw);
-    let p = `Base directory for this skill: ${skillDir}\n\n${body.trim()}`;
-    const hasPositional = /\$[1-9]\d*/.test(p);
+    const detail = await this.getSkillDetail(command);
+    if (!detail) return null;
+
+    let prompt = `Base directory for this skill: ${join(this.skillsDir, detail.dirName)}\n\n${detail.content}`;
+    const hasPositional = /\$[1-9]\d*/.test(prompt);
     if (hasPositional) {
       const parsed = args.split(" ");
       for (let i = 0; i < parsed.length; i++) {
-        p = p.replace(new RegExp(`\\$${i + 1}\\b`, "g"), parsed[i] || "");
+        prompt = prompt.replace(new RegExp(`\\$${i + 1}\\b`, "g"), parsed[i] || "");
       }
-    } else if (p.includes("$ARGUMENTS")) {
-      p = p.replace(/\$ARGUMENTS/g, args || "");
-    } else if (args) {
-      p += `\n\nArguments: ${args}`;
     }
-    return p;
+    if (prompt.includes("$ARGUMENTS")) {
+      prompt = prompt.replace(/\$ARGUMENTS/g, args || "");
+    } else if (!hasPositional && args) {
+      prompt += `\n\nArguments: ${args}`;
+    }
+    return prompt;
   }
 }

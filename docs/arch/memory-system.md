@@ -4,9 +4,9 @@
 
 ## Overview
 
-Two-layer memory system that gives the agent persistent recall across sessions. Layer 1 (MEMORY.md) holds long-term facts loaded into every system prompt. Layer 2 (HISTORY.md) is an append-only event log searched on demand via grep.
+Two-layer memory system that gives the agent persistent recall across sessions. Layer 1 (MEMORY.md) holds long-term facts loaded into every system prompt. Layer 2 (HISTORY.md) is an append-only event log. A local retrieval index now chunks and indexes both layers so the agent can recall prior decisions and events without relying only on exact-keyword grep.
 
-Consolidation is the bridge between layers: when a session ends or grows too large, an LLM call summarizes the conversation into a history entry and extracts durable facts into memory.
+Consolidation is the bridge between layers: when a session ends or grows too large, an LLM call summarizes the conversation into a history entry and extracts durable facts into memory. Before an auto-trim, a lightweight memory flush runs first so durable notes can be preserved before older turns are compacted away.
 
 ## Storage Layout
 
@@ -29,9 +29,9 @@ workspace/memory/
 ### HISTORY.md / HISTORY-YYYY-MM.md
 
 - Append-only. Never truncated, never loaded into context automatically.
-- The agent searches it with `grep -i "keyword" memory/HISTORY*.md`.
 - Each entry is timestamped with an ISO header: `## 2026-02-27T14:30:00.000Z`.
 - `appendHistoryRotated()` writes to both the main file and the monthly file. Main file exists for backward compatibility; monthly files keep grep fast as history grows.
+- The retrieval index chunks these files by timestamp block and ranks them with SQLite FTS when memory recall is needed.
 
 ## Components
 
@@ -45,6 +45,24 @@ Owns the filesystem. No LLM calls, no network I/O.
 | `writeMemory(content)` | Overwrites MEMORY.md |
 | `appendHistory(entry)` | Appends to HISTORY.md only (legacy) |
 | `appendHistoryRotated(entry)` | Appends to both HISTORY.md and HISTORY-YYYY-MM.md |
+
+### MemoryRetrievalService (`src/memory/retrieval.ts`)
+
+Owns chunking, SQLite FTS indexing, and recall search.
+
+- Canonical source remains `workspace/memory/*.md`; SQLite is only a retrieval cache.
+- `sync()` builds or refreshes `state/memory/index.sqlite`.
+- `search(query)` prefers FTS hits, boosts `MEMORY.md`, and falls back to direct file scanning if the index is unavailable.
+- `buildRecallSection(query)` injects up to a few snippets into the current user turn when the prompt looks memory-sensitive.
+- `memory_search` and `memory_get` tools expose the same retrieval layer for explicit model-driven lookup and chunk expansion.
+
+### MemoryFlushService (`src/memory/flush.ts`)
+
+Runs a lightweight LLM pass before auto-trim.
+
+- Triggered from `NeovateAgent.manageSessionWindow()` when the session exceeds `memoryWindow`.
+- Writes concise durable notes into `MEMORY.md` and optional dated notes into history.
+- Uses a short timeout and never blocks normal consolidation on failure.
 
 ### ConsolidationService (`src/memory/consolidation.ts`)
 
