@@ -128,7 +128,7 @@ export function defaultConfig(baseDir: string): Config {
       },
       memoryFlush: {
         enabled: true,
-        timeoutMs: 8000,
+        timeoutMs: 20000,
       },
     },
     channels: {

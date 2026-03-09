@@ -261,7 +261,7 @@ export class NeovateAgent implements Agent {
 
   private async flushMemoryBeforeTrim(messages: ConversationEntry[]): Promise<void> {
     if (!this.config.agent.memoryFlush?.enabled) return;
-    const timeout = this.config.agent.memoryFlush?.timeoutMs ?? 8000;
+    const timeout = this.config.agent.memoryFlush?.timeoutMs ?? 20000;
     const currentMemory = await this.memoryManager.readMemory();
 
     try {
