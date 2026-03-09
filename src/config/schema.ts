@@ -46,11 +46,26 @@ export interface FeishuConfig {
   dedupFile?: string;
 }
 
+export interface QQConfig {
+  enabled: boolean;
+  appId: string;
+  clientSecret: string;
+  allowFrom: string[];
+  requireMention?: boolean;
+  apiBase?: string;
+  wsIntentMask?: number;
+  wsReconnectBaseMs?: number;
+  wsReconnectMaxMs?: number;
+  dedupPersist?: boolean;
+  dedupFile?: string;
+}
+
 export interface ChannelsConfig {
   telegram: TelegramConfig;
   cli: CliConfig;
   dingtalk: DingtalkConfig;
   feishu: FeishuConfig;
+  qq: QQConfig;
 }
 
 export interface AgentConfig {
@@ -113,7 +128,7 @@ export function defaultConfig(baseDir: string): Config {
       },
       memoryFlush: {
         enabled: true,
-        timeoutMs: 8000,
+        timeoutMs: 20000,
       },
     },
     channels: {
@@ -138,6 +153,19 @@ export function defaultConfig(baseDir: string): Config {
         wsReconnectMaxMs: 30_000,
         dedupPersist: false,
         dedupFile: join(baseDir, "feishu-dedup.json"),
+      },
+      qq: {
+        enabled: false,
+        appId: "",
+        clientSecret: "",
+        allowFrom: [],
+        requireMention: true,
+        apiBase: "https://api.sgroup.qq.com",
+        wsIntentMask: (1 << 30) | (1 << 12) | (1 << 25),
+        wsReconnectBaseMs: 1000,
+        wsReconnectMaxMs: 30_000,
+        dedupPersist: false,
+        dedupFile: join(baseDir, "qq-dedup.json"),
       },
     },
     logLevel: "debug",
@@ -232,6 +260,41 @@ function envOverride(config: Config): Config {
   const fdedupFile = process.env.NEOCLAW_FEISHU_DEDUP_FILE;
   if (fdedupFile) config.channels.feishu.dedupFile = fdedupFile;
 
+  if (process.env.NEOCLAW_QQ_ENABLED === "true") {
+    config.channels.qq.enabled = true;
+  }
+  const qappId = process.env.NEOCLAW_QQ_APP_ID;
+  if (qappId) config.channels.qq.appId = qappId;
+  const qsecret = process.env.NEOCLAW_QQ_CLIENT_SECRET;
+  if (qsecret) config.channels.qq.clientSecret = qsecret;
+  const qaf = process.env.NEOCLAW_QQ_ALLOW_FROM;
+  if (qaf) config.channels.qq.allowFrom = qaf.split(",").map((s) => s.trim());
+  const qmention = process.env.NEOCLAW_QQ_REQUIRE_MENTION;
+  if (qmention === "true") config.channels.qq.requireMention = true;
+  if (qmention === "false") config.channels.qq.requireMention = false;
+  const qapiBase = process.env.NEOCLAW_QQ_API_BASE;
+  if (qapiBase) config.channels.qq.apiBase = qapiBase;
+  const qintent = process.env.NEOCLAW_QQ_WS_INTENT_MASK;
+  if (qintent) {
+    const n = Number(qintent);
+    if (Number.isFinite(n) && n > 0) config.channels.qq.wsIntentMask = Math.floor(n);
+  }
+  const qreconnBase = process.env.NEOCLAW_QQ_WS_RECONNECT_BASE_MS;
+  if (qreconnBase) {
+    const n = Number(qreconnBase);
+    if (Number.isFinite(n) && n > 0) config.channels.qq.wsReconnectBaseMs = Math.floor(n);
+  }
+  const qreconnMax = process.env.NEOCLAW_QQ_WS_RECONNECT_MAX_MS;
+  if (qreconnMax) {
+    const n = Number(qreconnMax);
+    if (Number.isFinite(n) && n > 0) config.channels.qq.wsReconnectMaxMs = Math.floor(n);
+  }
+  const qdedupPersist = process.env.NEOCLAW_QQ_DEDUP_PERSIST;
+  if (qdedupPersist === "true") config.channels.qq.dedupPersist = true;
+  if (qdedupPersist === "false") config.channels.qq.dedupPersist = false;
+  const qdedupFile = process.env.NEOCLAW_QQ_DEDUP_FILE;
+  if (qdedupFile) config.channels.qq.dedupFile = qdedupFile;
+
   return config;
 }
 
@@ -268,6 +331,7 @@ export function loadConfig(baseDir: string): Config {
       cli: { ...defaults.channels.cli, ...raw.channels?.cli },
       dingtalk: { ...defaults.channels.dingtalk, ...raw.channels?.dingtalk },
       feishu: { ...defaults.channels.feishu, ...raw.channels?.feishu },
+      qq: { ...defaults.channels.qq, ...raw.channels?.qq },
     };
   } else {
     config = structuredClone(defaults);

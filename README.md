@@ -8,7 +8,7 @@ A multi-channel AI agent built with [Neovate Code](https://github.com/neovate-co
 
 ## Features
 
-- **Multi-channel** — CLI, Telegram, DingTalk, and Feishu (experimental)
+- **Multi-channel** — CLI, Telegram, DingTalk, Feishu (experimental), and QQ (experimental)
 - **AI-powered** — Neovate Code agent with configurable models and providers
 - **Memory** — persistent conversation memory with automatic consolidation
 - **Cron jobs** — scheduled tasks with cron expression support
@@ -162,6 +162,36 @@ Feishu (experimental) minimal config:
   }
 }
 ```
+
+QQ (experimental) minimal config:
+
+```json
+{
+  "channels": {
+    "qq": {
+      "enabled": true,
+      "appId": "your-app-id",
+      "clientSecret": "your-client-secret",
+      "allowFrom": [],
+      "requireMention": true,
+      "apiBase": "https://api.sgroup.qq.com",
+      "wsIntentMask": 1107297280,
+      "wsReconnectBaseMs": 1000,
+      "wsReconnectMaxMs": 30000,
+      "dedupPersist": false,
+      "dedupFile": "~/.neoclaw/qq-dedup.json"
+    }
+  }
+}
+```
+
+QQ notes:
+
+- This integration targets the official QQ Open Platform Bot API.
+- The first stable path is usually sandbox private chat; group/channel permissions may require extra platform approval.
+- Leave `wsIntentMask` at the default unless you know exactly which event scopes you need to change.
+- For group use, keeping `requireMention` enabled is recommended.
+
 
 ## Development
 

@@ -117,6 +117,7 @@ async function processMsg(
       channel,
       chatId,
       content: "Sorry, an error occurred processing your message.",
+      replyTo: typeof msg.metadata.sourceMessageId === "string" ? msg.metadata.sourceMessageId : undefined,
       media: [],
       metadata: {},
     });
