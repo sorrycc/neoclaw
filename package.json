@@ -12,12 +12,15 @@
   "scripts": {
     "start": "bun run src/index.ts",
     "dev": "bun --watch run src/index.ts",
+    "test": "bun test",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist",
-    "build": "bun build src/index.ts --outdir dist --target node --packages external && printf '#!/usr/bin/env node\n' | cat - dist/index.js > dist/_tmp && mv dist/_tmp dist/index.js",
+    "build:web": "cd webapp && bun run build && mkdir -p ../dist && rm -rf ../dist/web && cp -r dist ../dist/web",
+    "build": "bun build src/index.ts --outdir dist --target node --packages external && printf '#!/usr/bin/env node\n' | cat - dist/index.js > dist/_tmp && mv dist/_tmp dist/index.js && bun run build:web",
     "release": "npm run clean && npm run build && npm version patch && npm publish"
   },
   "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.59.0",
     "@neovate/code": "^0.28.5",
     "axios": "^1.13.5",
     "cron-parser": "^4.9.0",
